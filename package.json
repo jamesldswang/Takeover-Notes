@@ -1,0 +1,15 @@
+{
+  "name": "project-notes",
+  "productName": "專案筆記",
+  "version": "1.0.0",
+  "description": "記錄每個 Claude Code 專案的進度和下一步，按 Ctrl+Alt+N 叫出；在 Claude Code 開啟專案時跳出提醒",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "node build.js"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11"
+  }
+}

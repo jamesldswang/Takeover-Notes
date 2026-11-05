@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>專案筆記</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📝</text></svg>">
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Microsoft JhengHei", Roboto, sans-serif;
+        }
+
+        body {
+            background-color: #141414;
+            color: #ffffff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .window {
+            width: 760px;
+            height: 580px;
+            background-color: #1e1e1e;
+            border-radius: 16px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .header {
+            background-color: #282828;
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            user-select: none;
+        }
+
+        .window-controls { display: flex; gap: 8px; }
+        .dot { width: 12px; height: 12px; border-radius: 50%; }
+        .dot-close { background-color: #ff5f56; }
+        .dot-min { background-color: #ffbd2e; }
+        .dot-max { background-color: #27c93f; }
+
+        .app-title { font-size: 14px; font-weight: 600; color: #e5e5ea; }
+        .header-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+        .search {
+            background: #1c1c1e; border: 1px solid #3a3a3c; border-radius: 8px;
+            color: #fff; padding: 6px 10px; font-size: 13px; width: 180px; outline: none;
+        }
+        .search:focus { border-color: #ffcc00; }
+
+        .btn {
+            border: none;
+            border-radius: 20px;
+            padding: 7px 14px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.15s;
+            white-space: nowrap;
+        }
+        .btn:active { opacity: 0.7; }
+        .btn:disabled { opacity: 0.35; cursor: default; }
+        .btn-primary { background-color: #ffcc00; color: #1c1c1e; }
+        .btn-secondary { background-color: #323234; color: #fff; }
+        .btn-danger { background-color: transparent; color: #ff453a; padding-left: 0; }
+        .btn-small { padding: 5px 10px; font-size: 12px; }
+
+        .main { flex: 1; display: flex; min-height: 0; }
+
+        /* 左側專案清單 */
+        .sidebar {
+            width: 250px; flex-shrink: 0; border-right: 1px solid rgba(255, 255, 255, 0.06);
+            overflow-y: auto; padding: 8px; user-select: none;
+        }
+        .project-item {
+            padding: 10px 12px; border-radius: 10px; cursor: pointer; margin-bottom: 4px;
+        }
+        .project-item:hover { background: #2a2a2c; }
+        .project-item.active { background: #3a3a3c; }
+        .project-name {
+            font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px;
+            overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+        }
+        .project-next {
+            font-size: 12px; color: #8e8e93; margin-top: 3px;
+            overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+        }
+        .project-next.has-next { color: #ffd60a; }
+        .project-time { font-size: 11px; color: #636366; margin-top: 2px; }
+        .sidebar-empty { color: #636366; font-size: 13px; padding: 16px 8px; line-height: 1.6; }
+
+        /* 右側內容 */
+        .detail { flex: 1; overflow-y: auto; padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; }
+        .detail-empty {
+            margin: auto; text-align: center; color: #8e8e93; font-size: 14px; line-height: 1.8; user-select: none;
+        }
+        .detail-empty .big { font-size: 40px; }
+
+        .name-input {
+            background: transparent; border: none; color: #fff; font-size: 22px; font-weight: 700;
+            outline: none; width: 100%; padding: 2px 0; border-bottom: 1px solid transparent;
+        }
+        .name-input:focus { border-bottom-color: #3a3a3c; }
+        .path-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8e8e93; margin-top: 4px; }
+        .path-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+        .icon-btn {
+            background: #2c2c2e; border: none; color: #fff; border-radius: 6px; cursor: pointer;
+            font-size: 12px; padding: 3px 8px; flex-shrink: 0;
+        }
+        .icon-btn:hover { background: #3a3a3c; }
+
+        .section-label {
+            font-size: 12px; font-weight: 600; color: #8e8e93; margin-bottom: 6px;
+            display: flex; align-items: center; justify-content: space-between; user-select: none;
+        }
+        textarea, .field {
+            width: 100%; background: #2c2c2e; border: 1px solid transparent; border-radius: 10px;
+            color: #fff; font-size: 14px; line-height: 1.55; padding: 10px 12px; outline: none; resize: none;
+        }
+        textarea:focus, .field:focus { border-color: #ffcc00; }
+        textarea::placeholder, .field::placeholder { color: #636366; }
+        #progressInput { height: 110px; }
+        #nextInput { height: 80px; }
+
+        .toggle-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #c7c7cc; user-select: none; cursor: pointer; }
+        .toggle-row input { accent-color: #ffcc00; width: 15px; height: 15px; cursor: pointer; }
+
+        .history { display: flex; flex-direction: column; gap: 6px; }
+        .history-item { display: flex; gap: 10px; font-size: 13px; color: #c7c7cc; line-height: 1.5; }
+        .history-date { color: #636366; flex-shrink: 0; font-size: 12px; padding-top: 1px; min-width: 70px; }
+        .history-text { white-space: pre-wrap; word-break: break-word; }
+        .muted { color: #636366; font-size: 13px; }
+
+        .detail-footer { margin-top: auto; padding-top: 6px; display: flex; justify-content: space-between; align-items: center; }
+
+        /* 對話框 */
+        .modal {
+            position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55); display: none;
+            align-items: center; justify-content: center; z-index: 10;
+        }
+        .modal.show { display: flex; }
+        .modal-content {
+            background: #2c2c2e; border-radius: 14px; padding: 20px; width: 440px; max-height: 92%;
+            overflow-y: auto; display: flex; flex-direction: column; gap: 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+        .modal-content .field, .modal-content textarea { background: #1c1c1e; }
+        .modal-title { font-size: 17px; font-weight: 700; }
+        .modal-sub { font-size: 12px; color: #8e8e93; word-break: break-all; }
+        .modal-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+        .reminder-content { width: 500px; border: 1px solid rgba(255, 204, 0, 0.35); }
+        .reminder-progress {
+            background: #1c1c1e; border-radius: 10px; padding: 10px 12px; font-size: 13px; color: #c7c7cc;
+            line-height: 1.55; white-space: pre-wrap; max-height: 120px; overflow-y: auto;
+        }
+        #reminderNext { height: 90px; }
+        .reminder-hint { font-size: 12px; color: #8e8e93; line-height: 1.5; }
+        .reminder-count { font-size: 12px; color: #ffcc00; }
+
+        /* 快速切換（launcher）模式：視窗變小，只有搜尋框和清單 */
+        .window.launcher { width: 600px; height: 440px; }
+        .window.launcher .main, .window.launcher .full-only { display: none !important; }
+        .window:not(.launcher) .launcher-view, .window:not(.launcher) .launcher-only { display: none !important; }
+        .launcher-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+        .launcher-search {
+            margin: 12px 14px 6px; background: #1c1c1e; border: 1px solid #3a3a3c; border-radius: 10px;
+            color: #fff; font-size: 16px; padding: 10px 14px; outline: none;
+        }
+        .launcher-search:focus { border-color: #ffcc00; }
+        .launcher-list { flex: 1; overflow-y: auto; padding: 4px 8px; user-select: none; }
+        .launcher-item {
+            display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; cursor: pointer;
+        }
+        .launcher-item.active { background: #3a3a3c; }
+        .launcher-main { flex: 1; min-width: 0; }
+        .launcher-top { display: flex; align-items: baseline; gap: 8px; }
+        .launcher-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .launcher-time { font-size: 11px; color: #636366; white-space: nowrap; margin-left: auto; }
+        .launcher-sub { font-size: 12px; color: #8e8e93; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .launcher-sub.has-next { color: #ffd60a; }
+        .launcher-path { font-size: 11px; color: #636366; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .launcher-actions { display: none; gap: 6px; flex-shrink: 0; }
+        .launcher-item.active .launcher-actions { display: flex; }
+        .launcher-footer {
+            display: flex; gap: 14px; padding: 8px 16px; font-size: 11px; color: #8e8e93; user-select: none;
+            border-top: 1px solid rgba(255, 255, 255, 0.06); flex-wrap: wrap;
+        }
+        kbd { background: #2c2c2e; border-radius: 4px; padding: 1px 5px; font-family: inherit; font-size: 11px; color: #c7c7cc; }
+        .launcher-error { color: #ff453a; font-size: 12px; padding: 0 16px; }
+        .launcher-error:not(:empty) { padding-bottom: 6px; }
+        .launcher-empty { color: #636366; font-size: 13px; padding: 20px 12px; line-height: 1.7; }
+    </style>
+</head>
+<body>
+<div class="window launcher" id="win">
+    <div class="header">
+        <div class="window-controls">
+            <div class="dot dot-close"></div>
+            <div class="dot dot-min"></div>
+            <div class="dot dot-max"></div>
+        </div>
+        <div class="app-title">📝 專案筆記</div>
+        <div class="header-actions">
+            <input class="search full-only" id="searchInput" placeholder="搜尋專案…" oninput="renderList()">
+            <button class="btn btn-secondary btn-small full-only" onclick="setMode('launcher', true)" title="Esc">⚡ 快速切換</button>
+            <button class="btn btn-primary btn-small full-only" onclick="openAddModal()">＋ 新增專案</button>
+            <button class="btn btn-secondary btn-small launcher-only" onclick="openNotes()" title="Tab">📋 管理筆記</button>
+        </div>
+    </div>
+    <div class="launcher-view">
+        <input class="launcher-search" id="launcherInput" placeholder="輸入專案名稱，或貼上資料夾路徑…" autocomplete="off"
+               oninput="launcherIndex = 0; renderLauncher()" onkeydown="launcherKey(event)">
+        <div class="launcher-error" id="launcherError"></div>
+        <div class="launcher-list" id="launcherList"></div>
+        <div class="launcher-footer">
+            <span><kbd>↑</kbd><kbd>↓</kbd> 選擇</span>
+            <span><kbd>Enter</kbd> 開啟 Claude Code</span>
+            <span><kbd>Shift</kbd>+<kbd>Enter</kbd> 接續上次對話</span>
+            <span><kbd>Tab</kbd> 看筆記</span>
+            <span><kbd>Esc</kbd> 關閉</span>
+        </div>
+    </div>
+    <div class="main">
+        <div class="sidebar" id="projectList"></div>
+        <div class="detail" id="detail"></div>
+    </div>
+
+    <!-- 新增專案 -->
+    <div class="modal" id="addModal">
+        <div class="modal-content">
+            <div class="modal-title">新增專案</div>
+            <div>
+                <div class="section-label">專案資料夾路徑</div>
+                <input class="field" id="addPath" placeholder="例如 C:\Users\user\MyApp">
+            </div>
+            <div>
+                <div class="section-label">名稱（空白就用資料夾名稱）</div>
+                <input class="field" id="addName" placeholder="">
+            </div>
+            <div class="modal-sub">在 Claude Code 打開某個資料夾時，App 也會自動把它加進清單。</div>
+            <div class="modal-buttons">
+                <button class="btn btn-secondary" onclick="closeModal('addModal')">取消</button>
+                <button class="btn btn-primary" onclick="addProject()">新增</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 刪除確認 -->
+    <div class="modal" id="confirmModal">
+        <div class="modal-content">
+            <div class="modal-title" id="confirmText"></div>
+            <div class="modal-sub">只會刪除筆記，不會動到專案資料夾裡的檔案。</div>
+            <div class="modal-buttons">
+                <button class="btn btn-secondary" onclick="closeModal('confirmModal')">取消</button>
+                <button class="btn btn-primary" style="background:#ff453a;color:#fff" onclick="confirmDelete()">刪除</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 開啟專案時的提醒 -->
+    <div class="modal" id="reminderModal">
+        <div class="modal-content reminder-content">
+            <div class="reminder-count" id="reminderCount"></div>
+            <div class="modal-title" id="reminderTitle"></div>
+            <div class="modal-sub" id="reminderPath"></div>
+            <div>
+                <div class="section-label">現在的進度</div>
+                <div class="reminder-progress" id="reminderProgress"></div>
+            </div>
+            <div>
+                <div class="section-label">下一步（可以先修改再執行）</div>
+                <textarea id="reminderNext"></textarea>
+            </div>
+            <div class="reminder-hint">按「立刻執行」後，Claude 會收到這個下一步；在 Claude Code 隨便輸入一句（例如「開始」）就會動工。指令也已複製到剪貼簿。</div>
+            <div class="modal-buttons">
+                <button class="btn btn-secondary" onclick="answerReminder('later')">稍後再說</button>
+                <button class="btn btn-primary" id="reminderRunBtn" onclick="answerReminder('run')">▶ 立刻執行</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ---------- 資料存取 ----------
+    // 在 App 裡用 window.__notesApp（資料由 main.js 存在 %APPDATA%\專案筆記\notes.json）；
+    // 直接用瀏覽器打開這個檔案時，改用 localStorage，功能一樣能用。
+    const api = window.__notesApp || localApi();
+
+    function localApi() {
+        const KEY = 'notes.projects';
+        let listeners = [];
+        const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } };
+        const save = (ps) => {
+            try { localStorage.setItem(KEY, JSON.stringify(ps)); } catch {}
+            setTimeout(() => listeners.forEach(cb => cb(ps)));
+        };
+        const now = () => new Date().toISOString();
+        return {
+            list: load,
+            add({ path, name }) {
+                const ps = load();
+                const p = { id: Date.now().toString(36), path, name: name || path.split(/[\\/]/).filter(Boolean).pop() || path,
+                    progress: '', next: '', remind: true, history: [], createdAt: now(), lastOpenedAt: null };
+                ps.push(p); save(ps); return p;
+            },
+            update(id, patch) { const ps = load(); const p = ps.find(x => x.id === id); if (p) { Object.assign(p, patch); save(ps); } },
+            complete(id) {
+                const ps = load(); const p = ps.find(x => x.id === id);
+                if (p && p.next.trim()) { p.history.unshift({ at: now(), text: p.next.trim() }); p.next = ''; save(ps); }
+            },
+            remove(id) { save(load().filter(x => x.id !== id)); },
+            openFolder() {},
+            onChange(cb) { listeners.push(cb); },
+            onReminder() {}, onReminderCancel() {}, answerReminder() {},
+            launchClaude: async () => ({ ok: false, error: '只有在 App 裡才能開啟 Claude Code' }),
+            setMode() {}, onMode() {}, hide() {},
+            show() {}, pin() {}, unpin() {},
+        };
+    }
+
+    let projects = api.list();
+    let selectedId = null;
+    let pendingDeleteId = null;
+
+    const escapeHtml = str => String(str).replace(/[&<>"']/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    function relTime(iso) {
+        if (!iso) return '還沒在 Claude Code 開啟過';
+        const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+        if (diff < 60) return '剛剛開啟';
+        if (diff < 3600) return `${Math.floor(diff / 60)} 分鐘前開啟`;
+        if (diff < 86400) return `${Math.floor(diff / 3600)} 小時前開啟`;
+        if (diff < 86400 * 7) return `${Math.floor(diff / 86400)} 天前開啟`;
+        return fmtDate(iso) + ' 開啟';
+    }
+
+    function fmtDate(iso) {
+        const d = new Date(iso);
+        return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+    }
+
+    // 最近開啟的排前面；沒開啟過的依建立時間
+    function sortedProjects() {
+        const key = p => p.lastOpenedAt || p.createdAt || '';
+        return [...projects].sort((a, b) => key(b).localeCompare(key(a)));
+    }
+
+    // ---------- 清單 ----------
+    function renderList() {
+        const q = document.getElementById('searchInput').value.trim().toLowerCase();
+        const list = sortedProjects().filter(p => !q ||
+            [p.name, p.path, p.progress, p.next].some(s => s.toLowerCase().includes(q)));
+        const el = document.getElementById('projectList');
+        if (!projects.length) {
+            el.innerHTML = `<div class="sidebar-empty">還沒有專案。<br>在 Claude Code 打開任何專案資料夾，這裡就會自動出現；也可以按右上角「＋ 新增專案」。</div>`;
+            return;
+        }
+        if (!list.length) { el.innerHTML = `<div class="sidebar-empty">找不到符合「${escapeHtml(q)}」的專案</div>`; return; }
+        el.innerHTML = list.map(p => `
+            <div class="project-item ${p.id === selectedId ? 'active' : ''}" onclick="selectProject('${p.id}')">
+                <div class="project-name">${escapeHtml(p.name)}${p.remind ? '' : ' <span title="提醒已關閉">🔕</span>'}</div>
+                <div class="project-next ${p.next.trim() ? 'has-next' : ''}">${p.next.trim() ? '▶ ' + escapeHtml(p.next.trim().split('\n')[0]) : '沒有下一步'}</div>
+                <div class="project-time">${relTime(p.lastOpenedAt)}</div>
+            </div>`).join('');
+    }
+
+    function selectProject(id) {
+        flushEdits();
+        selectedId = id;
+        renderList();
+        renderDetail(true);
+    }
+
+    // ---------- 內容 ----------
+    function current() { return projects.find(p => p.id === selectedId) || null; }
+
+    // full=true 時重建整個畫面；否則只更新沒在編輯中的欄位，避免打字時游標跳走
+    function renderDetail(full) {
+        const el = document.getElementById('detail');
+        const p = current();
+        if (!p) {
+            el.innerHTML = `<div class="detail-empty"><div class="big">📝</div>選一個專案，記下<b>現在的進度</b>和<b>下一步</b>。<br>下次在 Claude Code 打開它時，會跳出來提醒你。<br><span class="muted">Ctrl+Alt+N 叫出或隱藏</span></div>`;
+            return;
+        }
+        if (full || !document.getElementById('nameInput')) {
+            el.innerHTML = `
+                <div>
+                    <input class="name-input" id="nameInput" value="${escapeHtml(p.name)}" oninput="queueEdit('name', this.value)" placeholder="專案名稱">
+                    <div class="path-row">
+                        <span class="path-text" id="pathText" title="${escapeHtml(p.path)}">${escapeHtml(p.path)}</span>
+                        <button class="icon-btn" onclick="api.openFolder('${p.id}')" title="用檔案總管打開">📂 開啟</button>
+                        <button class="icon-btn" onclick="openClaude('${p.id}', false)" title="在這個資料夾開新的 Claude Code">▶ Claude Code</button>
+                        <button class="icon-btn" onclick="openClaude('${p.id}', true)" title="claude --continue">↻ 接續上次對話</button>
+                    </div>
+                </div>
+                <label class="toggle-row"><input type="checkbox" id="remindInput" ${p.remind ? 'checked' : ''} onchange="setRemind(this.checked)"> 在 Claude Code 開啟這個專案時提醒我下一步</label>
+                <div>
+                    <div class="section-label">① 現在的進度</div>
+                    <textarea id="progressInput" placeholder="做到哪裡了？例如：登入頁完成，API 串接一半" oninput="queueEdit('progress', this.value)"></textarea>
+                </div>
+                <div>
+                    <div class="section-label">② 下一步
+                        <button class="btn btn-secondary btn-small" id="completeBtn" onclick="completeNext()">✓ 這一步完成了</button>
+                    </div>
+                    <textarea id="nextInput" placeholder="下次打開時要先做什麼？" oninput="queueEdit('next', this.value)"></textarea>
+                </div>
+                <div>
+                    <div class="section-label">完成紀錄</div>
+                    <div class="history" id="historyList"></div>
+                </div>
+                <div class="detail-footer">
+                    <span class="muted" id="openedText"></span>
+                    <button class="btn btn-danger btn-small" onclick="askDelete('${p.id}')">刪除專案</button>
+                </div>`;
+            document.getElementById('progressInput').value = p.progress;
+            document.getElementById('nextInput').value = p.next;
+        } else {
+            setIfIdle('nameInput', p.name);
+            setIfIdle('progressInput', p.progress);
+            setIfIdle('nextInput', p.next);
+            document.getElementById('remindInput').checked = p.remind;
+            const pt = document.getElementById('pathText');
+            pt.textContent = p.path; pt.title = p.path;
+        }
+        const nextNow = edits.next !== undefined ? edits.next : p.next;
+        document.getElementById('completeBtn').disabled = !nextNow.trim();
+        document.getElementById('openedText').textContent = relTime(p.lastOpenedAt);
+        document.getElementById('historyList').innerHTML = p.history.length
+            ? p.history.map(h => `<div class="history-item"><span class="history-date">${fmtDate(h.at)}</span><span class="history-text">✓ ${escapeHtml(h.text)}</span></div>`).join('')
+            : '<div class="muted">完成「下一步」後按「✓ 這一步完成了」，會記在這裡。</div>';
+    }
+
+    function setIfIdle(id, value) {
+        const el = document.getElementById(id);
+        if (el && document.activeElement !== el && el.value !== value) el.value = value;
+    }
+
+    // ---------- 編輯（打字時先暫存，停 0.4 秒後一次送出）----------
+    let edits = {}, editTimer = null, editId = null;
+
+    function queueEdit(field, value) {
+        if (editId !== selectedId) { flushEdits(); editId = selectedId; }
+        edits[field] = value;
+        if (field === 'next') document.getElementById('completeBtn').disabled = !value.trim();
+        clearTimeout(editTimer);
+        editTimer = setTimeout(flushEdits, 400);
+    }
+
+    function flushEdits() {
+        clearTimeout(editTimer);
+        if (editId && Object.keys(edits).length) {
+            if ('name' in edits && !edits.name.trim()) delete edits.name; // 名稱不能空白
+            api.update(editId, edits);
+            const p = projects.find(x => x.id === editId);
+            if (p) Object.assign(p, edits);
+        }
+        edits = {}; editId = null;
+    }
+
+    window.addEventListener('blur', flushEdits);
+    document.addEventListener('visibilitychange', flushEdits);
+
+    function setRemind(on) { flushEdits(); api.update(selectedId, { remind: on }); }
+
+    function completeNext() {
+        flushEdits();
+        api.complete(selectedId);
+        document.getElementById('nextInput').value = '';
+        document.getElementById('nextInput').focus();
+    }
+
+    // ---------- 新增 / 刪除 ----------
+    function openModal(id) { document.getElementById(id).classList.add('show'); }
+    function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+    function openAddModal() {
+        document.getElementById('addPath').value = '';
+        document.getElementById('addName').value = '';
+        openModal('addModal');
+        document.getElementById('addPath').focus();
+    }
+
+    function addProject() {
+        const path = document.getElementById('addPath').value.trim().replace(/^"|"$/g, '');
+        const name = document.getElementById('addName').value.trim();
+        if (!path) { document.getElementById('addPath').focus(); return; }
+        flushEdits();
+        const p = api.add({ path, name });
+        projects = api.list();
+        closeModal('addModal');
+        selectProject(p.id);
+    }
+
+    function askDelete(id) {
+        const p = projects.find(x => x.id === id);
+        if (!p) return;
+        pendingDeleteId = id;
+        document.getElementById('confirmText').textContent = `刪除「${p.name}」的筆記？`;
+        openModal('confirmModal');
+    }
+
+    function confirmDelete() {
+        if (pendingDeleteId) {
+            if (editId === pendingDeleteId) { edits = {}; editId = null; }
+            api.remove(pendingDeleteId);
+            if (selectedId === pendingDeleteId) selectedId = null;
+        }
+        pendingDeleteId = null;
+        closeModal('confirmModal');
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            const open = ['addModal', 'confirmModal'].filter(id => document.getElementById(id).classList.contains('show'));
+            if (open.length) open.forEach(closeModal);
+            else if (mode === 'full' && !reminders.length) setMode('launcher', true); // 完整筆記按 Esc 回快速切換
+        }
+        if (e.key === 'Enter' && document.getElementById('addModal').classList.contains('show')) addProject();
+    });
+
+    // ---------- 快速切換（launcher）----------
+    let mode = 'launcher';
+    let launcherIndex = 0;
+
+    // tellMain=true 時請 main.js 改視窗大小；main.js 送來的 mode 事件則只切畫面
+    function setMode(m, tellMain) {
+        if (m !== 'launcher' && m !== 'full') return;
+        if (m === 'full') flushEdits();
+        mode = m;
+        document.getElementById('win').classList.toggle('launcher', m === 'launcher');
+        if (tellMain) api.setMode(m);
+        if (m === 'launcher') {
+            const input = document.getElementById('launcherInput');
+            input.value = '';
+            launcherIndex = 0;
+            document.getElementById('launcherError').textContent = '';
+            renderLauncher();
+            input.focus();
+        } else {
+            renderList();
+            renderDetail(true);
+        }
+    }
+
+    const looksLikePath = q => /^[a-zA-Z]:[\\/]/.test(q) || q.startsWith('\\\\');
+    const pathKey = q => q.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+
+    // 目前清單：符合搜尋的專案；輸入的是資料夾路徑、而且清單裡沒有時，最後多一項「新資料夾」
+    function launcherItems() {
+        const raw = document.getElementById('launcherInput').value.trim().replace(/^"|"$/g, '');
+        const q = raw.toLowerCase();
+        const items = sortedProjects()
+            .filter(p => !q || [p.name, p.path, p.next].some(s => s.toLowerCase().includes(q)))
+            .map(p => ({ type: 'project', p }));
+        if (looksLikePath(raw) && !projects.some(p => pathKey(p.path) === pathKey(raw)))
+            items.push({ type: 'new', path: raw });
+        return items;
+    }
+
+    function renderLauncher() {
+        const items = launcherItems();
+        if (launcherIndex >= items.length) launcherIndex = Math.max(0, items.length - 1);
+        const el = document.getElementById('launcherList');
+        if (!items.length) {
+            el.innerHTML = `<div class="launcher-empty">${projects.length ? '找不到符合的專案。' : '還沒有專案。'}<br>貼上資料夾路徑（例如 C:\\Users\\user\\MyApp）按 Enter，就會在那裡開啟 Claude Code。</div>`;
+            return;
+        }
+        el.innerHTML = items.map((it, i) => {
+            const active = i === launcherIndex ? 'active' : '';
+            if (it.type === 'new') return `
+                <div class="launcher-item ${active}" onmouseenter="hoverLauncher(${i})" onclick="runLauncher(${i}, false)">
+                    <div class="launcher-main">
+                        <div class="launcher-name">＋ 在新資料夾開啟 Claude Code</div>
+                        <div class="launcher-path">${escapeHtml(it.path)}</div>
+                    </div>
+                </div>`;
+            const p = it.p, next = p.next.trim();
+            const sub = next ? '▶ 下一步：' + next.split('\n')[0] : (p.progress.trim().split('\n')[0] || '沒有下一步');
+            return `
+                <div class="launcher-item ${active}" onmouseenter="hoverLauncher(${i})" onclick="runLauncher(${i}, event.shiftKey)">
+                    <div class="launcher-main">
+                        <div class="launcher-top">
+                            <span class="launcher-name">${escapeHtml(p.name)}</span>
+                            <span class="launcher-time">${relTime(p.lastOpenedAt)}</span>
+                        </div>
+                        <div class="launcher-sub ${next ? 'has-next' : ''}">${escapeHtml(sub)}</div>
+                        <div class="launcher-path">${escapeHtml(p.path)}</div>
+                    </div>
+                    <div class="launcher-actions">
+                        <button class="icon-btn" title="看筆記（Tab）" onclick="event.stopPropagation(); openNotes(${i})">✎ 筆記</button>
+                    </div>
+                </div>`;
+        }).join('');
+        el.querySelector('.launcher-item.active')?.scrollIntoView({ block: 'nearest' });
+    }
+
+    function hoverLauncher(i) {
+        if (i === launcherIndex) return;
+        launcherIndex = i;
+        document.querySelectorAll('.launcher-item').forEach((el, j) => el.classList.toggle('active', j === i));
+    }
+
+    function launcherKey(e) {
+        const n = launcherItems().length;
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (n) { launcherIndex = (launcherIndex + (e.key === 'ArrowDown' ? 1 : -1) + n) % n; renderLauncher(); }
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            runLauncher(launcherIndex, e.shiftKey);
+        } else if (e.key === 'Tab') {
+            e.preventDefault();
+            openNotes(launcherIndex);
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            api.hide();
+        }
+    }
+
+    // 開啟 Claude Code；新資料夾先加進清單
+    async function runLauncher(i, cont) {
+        const it = launcherItems()[i];
+        if (!it) return;
+        let id;
+        if (it.type === 'new') { id = api.add({ path: it.path }).id; projects = api.list(); }
+        else id = it.p.id;
+        await openClaude(id, cont);
+    }
+
+    async function openClaude(id, cont) {
+        flushEdits();
+        const res = await api.launchClaude(id, cont);
+        const err = res && res.ok ? '' : ((res && res.error) || '開啟失敗');
+        if (mode === 'launcher') document.getElementById('launcherError').textContent = err;
+        else if (err) {
+            const el = document.getElementById('openedText');
+            if (el) { el.textContent = '⚠ ' + err; el.style.color = '#ff453a'; }
+        }
+    }
+
+    // 切到完整筆記，選取 launcher 目前那一項（沒有就保留原本選的）
+    function openNotes(i) {
+        const it = launcherItems()[i === undefined ? launcherIndex : i];
+        if (it && it.type === 'project') selectedId = it.p.id;
+        setMode('full', true);
+    }
+
+    api.onMode((m) => setMode(m, false));
+
+    // ---------- 開啟專案時的提醒 ----------
+    // hook.js 通知 main.js → main.js 送 reminder 過來 → 使用者按按鈕 → 回覆給 hook.js
+    let reminders = []; // [{ reqId, projectId }]
+
+    function showReminder() {
+        const r = reminders[0];
+        if (!r) { closeModal('reminderModal'); api.unpin(); return; }
+        const p = projects.find(x => x.id === r.projectId);
+        if (!p) { answerReminder('later'); return; }
+        if (mode !== 'full') setMode('full', false);
+        selectedId = p.id; renderList(); renderDetail(true);
+        document.getElementById('reminderCount').textContent = reminders.length > 1 ? `還有 ${reminders.length - 1} 個專案在等` : '';
+        document.getElementById('reminderTitle').textContent = `👋 你打開了「${p.name}」`;
+        document.getElementById('reminderPath').textContent = p.path;
+        document.getElementById('reminderProgress').textContent = p.progress.trim() || '（還沒有記錄進度）';
+        document.getElementById('reminderNext').value = p.next;
+        openModal('reminderModal');
+        document.getElementById('reminderRunBtn').focus();
+    }
+
+    function answerReminder(action) {
+        const r = reminders.shift();
+        if (!r) return;
+        const p = projects.find(x => x.id === r.projectId);
+        const next = document.getElementById('reminderNext').value;
+        if (p && next !== p.next) { api.update(p.id, { next }); p.next = next; } // 先存再回覆，hook 才拿得到改過的內容
+        api.answerReminder(r.reqId, action);
+        showReminder();
+    }
+
+    api.onReminder((r) => {
+        api.pin();
+        flushEdits();
+        projects = api.list();
+        reminders.push(r);
+        if (reminders.length === 1) showReminder();
+        else document.getElementById('reminderCount').textContent = `還有 ${reminders.length - 1} 個專案在等`;
+    });
+
+    // 等太久沒回應，main.js 已經當成「稍後」處理了
+    api.onReminderCancel((reqId) => {
+        const wasFirst = reminders[0] && reminders[0].reqId === reqId;
+        reminders = reminders.filter(r => r.reqId !== reqId);
+        if (wasFirst) showReminder();
+    });
+
+    document.getElementById('reminderNext').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && e.ctrlKey) answerReminder('run');
+    });
+
+    // ---------- 同步 ----------
+    api.onChange((ps) => {
+        projects = ps.map(p => editId === p.id ? { ...p, ...edits } : p);
+        if (selectedId && !current()) selectedId = null;
+        renderList();
+        renderDetail(false);
+        if (mode === 'launcher') renderLauncher();
+    });
+
+    if (projects.length) selectedId = sortedProjects()[0].id;
+    renderList();
+    renderDetail(true);
+    setMode('launcher', false);
+    setInterval(() => { renderList(); if (current()) document.getElementById('openedText').textContent = relTime(current().lastOpenedAt); }, 60 * 1000);
+</script>
+</body>
+</html>
