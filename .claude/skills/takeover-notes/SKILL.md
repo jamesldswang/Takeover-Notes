@@ -138,6 +138,8 @@ X=<解壓縮的資料夾>
   deleted: [{ id, at }]    // 刪除紀錄；比專案 updatedAt 新才算刪除
   ```
   - **認專案**（`findByPath()`）：① 路徑相同或 cwd 在它底下（取最深的）② git remote 相同 ③ 家目錄底下的相對路徑相同。用 ②③ 認到時 `touch()` 會把新路徑加進 `paths`。git remote 由 `main.js` 的 `gitRemote(dir)` 直接讀 `.git/config`（支援 worktree 的 `.git` 檔案）。
+  - **重複專案會自動併成一筆**：`normalize()` 會把同一個 remote 或共用路徑的專案用 `combine()` 併起來（`merge()` 也用同一個 `combine()`）。同一個 id 取 `updatedAt` 較新的內容；**不同 id** 保留 id 較小的那筆和它的名稱／remind，進度、下一步取較新且有內容的。被併掉的 id 寫進 `deleted`（`at` = 它的 `updatedAt`），舊版 App 合併時才不會把它加回來。
+  - 舊專案可能沒有 `remote`：`main.js` 的 `fillRemotes()`（啟動、`pollDataFile()` 合併後、`setDataDir()` 後）會用 `store.fillRemotes(data, remoteOf)` 從本機資料夾補上，有補到就順便併掉重複的。`store.touch()` 第一次查到 remote 時也會 `fold()`，所以回傳的專案可能是另一筆（id 較小的那筆）。
   - 改資料格式時，要考慮使用者已經存的舊資料（包括 1.0.0 前的專案筆記格式）：在 `store.js` 的 `normalizeProject()` 補預設值。`update()` 只接受 `EDITABLE` 裡的欄位（路徑不能從畫面改）。
 
 ## 提醒流程

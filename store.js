@@ -73,9 +73,52 @@ function normalizeProject(p) {
 // 專案依 id、刪除紀錄依 id 排序，路徑和完成紀錄也排好，同樣的內容永遠產生同樣的 JSON
 function normalize(d) {
   const byId = (x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
-  const projects = Array.isArray(d && d.projects) ? d.projects.filter((p) => p && (p.path || (p.paths && p.paths.length))).map(normalizeProject).sort(byId) : [];
-  const deleted = Array.isArray(d && d.deleted) ? d.deleted.filter((x) => x && x.id).map((x) => ({ id: String(x.id), at: String(x.at || nowIso()) })).sort(byId) : [];
-  return { projects, deleted };
+  const all = Array.isArray(d && d.projects) ? d.projects.filter((p) => p && (p.path || (p.paths && p.paths.length))).map(normalizeProject).sort(byId) : [];
+  const deleted = Array.isArray(d && d.deleted) ? d.deleted.filter((x) => x && x.id).map((x) => ({ id: String(x.id), at: String(x.at || nowIso()) })) : [];
+  // 同一份資料裡重複的專案（同一個 git remote 或共用路徑，例如另一台電腦先新增了、之後才認出是同一個）併成一個
+  const projects = [];
+  for (const q of all) {
+    const i = projects.findIndex((p) => p.id === q.id || (p.remote && p.remote === q.remote) || sharesPath(p, q));
+    if (i < 0) { projects.push(q); continue; }
+    const c = combine(projects[i], q);
+    // 被併掉的 id 留刪除紀錄：還沒更新的舊版 App 合併時才不會把它加回來
+    for (const x of [projects[i], q]) if (x.id !== c.id) deleted.push({ id: x.id, at: x.updatedAt });
+    projects[i] = normalizeProject(c);
+  }
+  const latest = new Map();
+  for (const x of deleted) if (!latest.has(x.id) || latest.get(x.id) < x.at) latest.set(x.id, x.at);
+  return { projects: projects.sort(byId), deleted: [...latest].map(([id, at]) => ({ id, at })).sort(byId) };
+}
+
+const sharesPath = (p, q) => p.paths.some((x) => q.paths.some((y) => normPath(x) === normPath(y)));
+
+// 把同一個專案的兩份合成一份（結果跟參數順序無關）。
+// 同一個 id（兩台電腦各改一份）：內容取 updatedAt 比較新的。
+// 不同 id（重複新增的）：保留比較早的 id 和名稱（使用者取的名字），進度／下一步取比較新且有內容的。
+function combine(p, q) {
+  const newer = q.updatedAt !== p.updatedAt ? (q.updatedAt > p.updatedAt ? q : p)
+    : (JSON.stringify(q) > JSON.stringify(p) ? q : p);
+  const older = newer === p ? q : p;
+  const first = p.id < q.id ? p : q;
+  const seen = new Set();
+  const out = {
+    ...newer,
+    id: first.id,
+    paths: [...p.paths, ...q.paths],
+    homePaths: [...p.homePaths, ...q.homePaths],
+    remote: [p.remote, q.remote].filter(Boolean).sort()[0] || '',
+    history: [...p.history, ...q.history]
+      .filter((h) => { const k = h.at + '|' + h.text; return !seen.has(k) && seen.add(k); }),
+    createdAt: p.createdAt < q.createdAt ? p.createdAt : q.createdAt,
+    lastOpenedAt: [p.lastOpenedAt, q.lastOpenedAt].filter(Boolean).sort().pop() || null,
+  };
+  if (p.id !== q.id) {
+    out.name = first.name;
+    out.remind = first.remind;
+    out.progress = newer.progress || older.progress;
+    out.next = newer.next || older.next;
+  }
+  return out;
 }
 
 // 找出 cwd 所屬的專案：
@@ -121,9 +164,33 @@ function touch(data, cwd, { open = true, remote = '', home } = {}) {
   } else if (!p.paths.some((x) => { const n = normPath(x), c = normPath(cwd); return c === n || c.startsWith(n + '\\'); })) {
     addPath(p, cwd, home);
   }
-  if (remote && !p.remote) p.remote = normRemote(remote);
+  if (remote && !p.remote) {
+    p.remote = normRemote(remote);
+    if (data.projects.some((x) => x !== p && x.remote === p.remote)) p = fold(data, p);
+  }
   if (open) p.lastOpenedAt = nowIso();
   return p;
+}
+
+// 重新整理 data（併掉重複的專案），回傳 p 併進去之後的那個專案
+function fold(data, p) {
+  const n = normalize(data);
+  data.projects = n.projects;
+  data.deleted = n.deleted;
+  return data.projects.find((x) => x.remote && x.remote === p.remote) || p;
+}
+
+// 補上還沒記錄的 git remote（舊資料、或在加入 remote 功能之前建立的專案）。
+// remoteOf(p) 回傳這台電腦上查得到的 remote；有補到就順便併掉重複的專案。回傳是否有改變。
+function fillRemotes(data, remoteOf) {
+  let changed = false;
+  for (const p of data.projects) {
+    if (p.remote) continue;
+    const r = normRemote(remoteOf(p));
+    if (r) { p.remote = r; changed = true; }
+  }
+  if (changed) { const n = normalize(data); data.projects = n.projects; data.deleted = n.deleted; }
+  return changed;
 }
 
 const EDITABLE = ['name', 'progress', 'next', 'remind'];
@@ -171,31 +238,17 @@ function merge(a, b) {
   // 否則兩台電腦會互相覺得「對方的版本不一樣」，一直改寫同步資料夾裡的檔案。
   const out = A.projects.map((p) => ({ ...p }));
   const same = (p, q) => p.id === q.id || (p.remote && p.remote === q.remote)
-    || p.paths.some((x) => q.paths.some((y) => normPath(x) === normPath(y)))
+    || sharesPath(p, q)
     || p.homePaths.some((x) => x && q.homePaths.includes(x));
 
   for (const q of B.projects) {
     const i = out.findIndex((p) => same(p, q));
     if (i < 0) { out.push({ ...q }); continue; }
-    const p = out[i];
-    // 內容取比較新的；一樣新就取 JSON 比較大的（只是為了固定結果）
-    const newer = q.updatedAt !== p.updatedAt ? (q.updatedAt > p.updatedAt ? q : p)
-      : (JSON.stringify(q) > JSON.stringify(p) ? q : p);
-    const seen = new Set();
-    out[i] = {
-      ...newer,
-      id: p.id < q.id ? p.id : q.id,
-      paths: [...p.paths, ...q.paths],
-      homePaths: [...p.homePaths, ...q.homePaths],
-      remote: [p.remote, q.remote].filter(Boolean).sort()[0] || '',
-      history: [...p.history, ...q.history]
-        .filter((h) => { const k = h.at + '|' + h.text; return !seen.has(k) && seen.add(k); }),
-      createdAt: p.createdAt < q.createdAt ? p.createdAt : q.createdAt,
-      lastOpenedAt: [p.lastOpenedAt, q.lastOpenedAt].filter(Boolean).sort().pop() || null,
-    };
+    out[i] = combine(out[i], q);
   }
   // 刪除紀錄比最後修改還新的專案才算刪除
   const projects = out.filter((p) => !(deleted.has(p.id) && deleted.get(p.id) >= p.updatedAt));
+  // normalize 會再併一次（例如 A 裡原本就有兩份、B 的一份把它們連起來）
   return normalize({ projects, deleted: [...deleted].map(([id, at]) => ({ id, at })) });
 }
 
@@ -205,4 +258,4 @@ function canon(d) {
   return JSON.stringify({ projects: n.projects, deleted: n.deleted });
 }
 
-module.exports = { normPath, homeRel, normRemote, normalize, normalizeProject, findByPath, touch, addPath, update, completeNext, remove, merge, canon };
+module.exports = { normPath, homeRel, normRemote, normalize, normalizeProject, findByPath, touch, addPath, fillRemotes, update, completeNext, remove, merge, canon };

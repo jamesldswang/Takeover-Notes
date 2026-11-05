@@ -84,4 +84,37 @@ t('舊版（專案筆記 1.0.0）的資料可以直接讀', () => {
   assert.deepStrictEqual(n.deleted, []);
 });
 
+t('重複：舊專案沒記 remote，另一台電腦又新增了一份 → 補上 remote 後併成一個，名稱保留原本的', () => {
+  const d = s.normalize({ projects: [
+    { id: 'a1', name: '時鐘', path: H1 + '/ClockApp', progress: 'v1.1.0', next: '加鬧鐘', updatedAt: '2026-11-05T05:00:00Z' },
+    { id: 'b2', name: 'Clock', path: 'D:/Personal_Git/Clock', remote: 'github.com/j/clock', updatedAt: '2026-11-05T09:00:00Z' },
+  ] });
+  const before = s.canon(d);
+  assert.strictEqual(s.fillRemotes(d, (p) => (p.id === 'a1' ? 'https://github.com/j/Clock.git' : '')), true);
+  assert.strictEqual(d.projects.length, 1);
+  const p = d.projects[0];
+  assert.strictEqual(p.id, 'a1');
+  assert.strictEqual(p.name, '時鐘');
+  assert.strictEqual(p.next, '加鬧鐘');
+  assert.strictEqual(p.paths.length, 2);
+  assert.ok(d.deleted.some((x) => x.id === 'b2'), '併掉的 id 要留刪除紀錄');
+  // 舊版 App 那邊（還有兩份）合併進來，結果不變；合併順序不影響
+  const old = s.normalize(JSON.parse(before));
+  assert.strictEqual(s.canon(s.merge(d, old)), s.canon(d));
+  assert.strictEqual(s.canon(s.merge(old, d)), s.canon(d));
+  assert.strictEqual(s.fillRemotes(d, () => 'x'), false, '已經有 remote 就不再查');
+});
+
+t('重複：開啟時才查到 remote，也會併成一個', () => {
+  const d = s.normalize({ projects: [
+    { id: 'a1', name: '時鐘', path: H1 + '/ClockApp', next: '加鬧鐘', updatedAt: '2026-11-05T05:00:00Z' },
+    { id: 'b2', name: 'Clock', path: 'D:/Personal_Git/Clock', remote: 'github.com/j/clock', updatedAt: '2026-11-05T09:00:00Z' },
+  ] });
+  const p = s.touch(d, H1 + '/ClockApp', { home: H1, remote: 'git@github.com:j/Clock.git' });
+  assert.strictEqual(d.projects.length, 1);
+  assert.strictEqual(p, d.projects[0]);
+  assert.strictEqual(p.name, '時鐘');
+  assert.ok(p.lastOpenedAt);
+});
+
 console.log(`\n${pass} 個測試全部通過`);

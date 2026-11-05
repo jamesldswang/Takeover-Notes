@@ -1,6 +1,6 @@
 # 📝 接管筆記 Takeover Notes
 
-**版本：1.0.0**　｜　[下載最新版](https://github.com/jamesldswang/Takeover-Notes/releases/latest)
+**版本：1.0.1**　｜　[下載最新版](https://github.com/jamesldswang/Takeover-Notes/releases/latest)
 
 記錄每一個在 Claude Code 開發的專案：**① 現在的進度**、**② 下一步**。程式常駐在系統匣，按 **Ctrl+Alt+N** 叫出快速切換，選專案就直接開啟 Claude Code。
 
@@ -12,7 +12,7 @@
 
 > 系統需求：Windows 10／11 64 位元，已安裝 [Claude Code](https://claude.com/claude-code)。**不需要安裝 Node.js。**
 
-1. 到 [Releases](https://github.com/jamesldswang/Takeover-Notes/releases/latest) 下載 `TakeoverNotes-1.0.0-win-x64.zip`，按右鍵選「解壓縮全部」，放到固定的位置（例如 `C:\Tools\TakeoverNotes`）。
+1. 到 [Releases](https://github.com/jamesldswang/Takeover-Notes/releases/latest) 下載 `TakeoverNotes-1.0.1-win-x64.zip`，按右鍵選「解壓縮全部」，放到固定的位置（例如 `C:\Tools\TakeoverNotes`）。
 2. 打開資料夾，雙擊 **`接管筆記.exe`**。畫面上不會跳出視窗，請看右下角系統匣有沒有出現黃色便條紙圖示。
 3. 按 **Ctrl+Alt+N**，上方會出現黃色提示「還沒連接 Claude Code」，按 **連接**。
    這會在 Claude Code 的設定（`%USERPROFILE%\.claude\settings.json`）加一個 SessionStart hook，原本的設定都會保留，改之前也會備份成 `settings.json.takeover-notes.bak`。
@@ -40,6 +40,7 @@
   1. 路徑相同（或在專案的子資料夾裡）
   2. **git remote 相同**（例如兩台都從 GitHub clone 同一個 repo）
   3. 在**使用者資料夾底下的位置相同**（例如兩台都是 `C:\Users\<名字>\ClockApp`）
+- 如果同一個專案已經在兩台電腦各被記成一筆（例如舊專案還沒記 git remote，另一台用不同名字新增了一份），App 查到兩筆的 git remote 相同時會**自動併成一筆**，保留原本取的名稱，進度、下一步和路徑都會留下。
 - 在快速切換裡，這台電腦還找不到資料夾的專案會標示「這台電腦找不到」。把這台電腦上的資料夾路徑貼到搜尋框按 Enter，或用 Claude Code 打開那個資料夾，就會接上。
 - 「接續上次對話」（Shift+Enter）用的是 Claude Code 自己的對話紀錄，那個只存在原本的電腦上；換電腦後請用一般的 Enter 開啟，Claude 會從筆記拿到「現在的進度」和「下一步」。
 
@@ -156,6 +157,11 @@ Takeover-Notes/
 ---
 
 ## 版本紀錄
+
+### 1.0.1（2026-11-05）
+
+- 修正：換電腦後，在另一台電腦開啟或貼上同一個 repo 的資料夾，會多出一筆不同名字的專案（例如「時鐘」變成兩筆，另一筆叫「Clock」）。原因是 1.0.0 之前建立的專案沒有記 git remote，認不出來。
+- 現在 App 啟動、同步讀到別台電腦的資料、更換資料夾時，會替還沒記 git remote 的專案補上，並把 git remote 相同的重複專案自動併成一筆（保留原本的名稱，進度、下一步、完成紀錄和各台電腦的路徑都會留下）。被併掉的那筆會留下刪除紀錄，另一台電腦還在跑舊版也不會把它加回來。
 
 ### 1.0.0（2026-11-05）
 

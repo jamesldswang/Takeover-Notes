@@ -137,6 +137,7 @@ function pollDataFile() {
     data = merged;
     sendProjects();
     if (differsFromDisk) changed(); // 本機有對方沒有的內容，寫回去
+    fillRemotes();
   } catch { /* 同步軟體寫到一半，下次再讀 */ }
 }
 
@@ -165,6 +166,11 @@ function gitRemote(dir) {
 }
 
 const touch = (cwd, opts = {}) => store.touch(data, cwd, { ...opts, remote: gitRemote(cwd) });
+
+// 舊專案補上 git remote，並把另一台電腦重複新增的同一個專案併起來；有改變就存檔
+function fillRemotes() {
+  if (store.fillRemotes(data, (p) => { const d = localPath(p); return d ? gitRemote(d) : ''; })) changed();
+}
 
 // ---------- Claude Code 整合 ----------
 const hookCmd = () => claudeSetup.hookCommand({ execPath: process.execPath, appDir: __dirname, packaged: app.isPackaged });
@@ -210,6 +216,7 @@ function setDataDir(dir) {
     knownMtime = mtime(target);
     saveNow();
     sendProjects();
+    fillRemotes();
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -467,6 +474,7 @@ app.whenReady().then(() => {
   loadConfig();
   migrateOldData();
   loadData();
+  fillRemotes();
   setInterval(pollDataFile, SYNC_POLL_MS);
 
   ipcMain.on('get-version', (e) => { e.returnValue = app.getVersion(); });
