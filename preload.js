@@ -28,6 +28,16 @@ contextBridge.exposeInMainWorld('__notesApp', {
   setMode: (m) => ipcRenderer.send('set-mode', m),   // 'launcher' | 'full'，視窗會跟著改大小
   onMode: (cb) => ipcRenderer.on('mode', (_e, m) => cb(m)),
   hide: () => ipcRenderer.send('win', 'hide'),
+  // 設定：Claude Code 整合、資料位置、匯出／匯入（換電腦用）
+  getSettings: () => ipcRenderer.sendSync('get-settings'),
+  connectClaude: () => ipcRenderer.invoke('connect-claude'),
+  disconnectClaude: () => ipcRenderer.invoke('disconnect-claude'),
+  chooseDataDir: () => ipcRenderer.invoke('choose-data-dir'),
+  resetDataDir: () => ipcRenderer.invoke('reset-data-dir'),
+  openDataDir: () => ipcRenderer.send('open-data-dir'),
+  exportData: () => ipcRenderer.invoke('export-data'),
+  importData: () => ipcRenderer.invoke('import-data'),
+  onOpenSettings: (cb) => ipcRenderer.on('open-settings', () => cb()),
   show: () => ipcRenderer.send('win', 'show'),
   pin: () => ipcRenderer.send('win', 'pin'),
   unpin: () => ipcRenderer.send('win', 'unpin'),

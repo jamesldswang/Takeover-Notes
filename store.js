@@ -1,88 +1,208 @@
-// 專案筆記的資料操作（純函式，不碰 Electron，main.js 和測試都可以用）
+// 接管筆記的資料操作（純函式，不碰 Electron，main.js、hook.js 和測試都可以用）
 //
-// 資料格式：{ projects: [Project] }
-// Project = { id, path, name, progress, next, remind, history: [{ at, text }],
-//             createdAt, lastOpenedAt }   // 時間都是 ISO 字串
+// 資料格式：{ projects: [Project], deleted: [{ id, at }] }
+// Project = {
+//   id, name, path,            // path：最近一次使用的路徑
+//   paths: [],                 // 這個專案在各台電腦用過的所有路徑
+//   homePaths: [],             // 相對於該台電腦家目錄的路徑（例如 'ClockApp'），換電腦時用來認專案
+//   remote: '',                // git origin（正規化成 github.com/owner/repo），換電腦時用來認專案
+//   progress, next, remind, history: [{ at, text }],
+//   createdAt, updatedAt, lastOpenedAt   // ISO 字串；updatedAt 只在內容改變時更新，合併時用
+// }
+// deleted：刪除紀錄（墓碑），兩台電腦合併時才不會把刪掉的專案又加回來。
+const os = require('os');
 const path = require('path');
+
+const nowIso = () => new Date().toISOString();
 
 // Windows 路徑不分大小寫：統一成小寫、反斜線、去掉結尾的斜線，用來比對
 function normPath(p) {
   return path.resolve(String(p)).replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
 }
 
+// 相對於家目錄的路徑（不在家目錄底下就回傳 ''）
+function homeRel(p, home = os.homedir()) {
+  const n = normPath(p), h = normPath(home);
+  return n.startsWith(h + '\\') ? n.slice(h.length + 1) : '';
+}
+
+// git remote 正規化：https://github.com/A/B.git、git@github.com:A/B 都變成 github.com/a/b
+function normRemote(url) {
+  if (!url) return '';
+  let s = String(url).trim().toLowerCase();
+  s = s.replace(/^[a-z+]+:\/\//, '').replace(/^[^@/]+@/, '').replace(/:(?!\d)/, '/');
+  return s.replace(/\.git$/, '').replace(/\/+$/, '');
+}
+
 function newId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+const uniq = (arr) => [...new Set(arr.filter(Boolean))];
+const uniqPaths = (arr) => {
+  const seen = new Set();
+  return arr.filter((p) => p && !seen.has(normPath(p)) && seen.add(normPath(p)));
+};
+
 // 載入舊資料時補上缺少的欄位
 function normalizeProject(p) {
-  const now = new Date().toISOString();
+  const now = nowIso();
+  const mainPath = String(p.path || (p.paths && p.paths[0]) || '');
+  const paths = uniqPaths([mainPath, ...(Array.isArray(p.paths) ? p.paths.map(String) : [])])
+    .sort((x, y) => normPath(x).localeCompare(normPath(y)));
   return {
     id: String(p.id || newId()),
-    path: String(p.path || ''),
-    name: String(p.name || (p.path ? path.basename(String(p.path)) : '未命名專案')),
+    name: String(p.name || (mainPath ? path.basename(mainPath) : '未命名專案')),
+    path: mainPath,
+    paths,
+    homePaths: uniq([...(Array.isArray(p.homePaths) ? p.homePaths.map(String) : []), ...paths.map((x) => homeRel(x))]).sort(),
+    remote: normRemote(p.remote),
     progress: String(p.progress || ''),
     next: String(p.next || ''),
     remind: p.remind !== false,
-    history: Array.isArray(p.history) ? p.history.filter((h) => h && h.text).map((h) => ({ at: String(h.at || now), text: String(h.text) })) : [],
+    history: Array.isArray(p.history)
+      ? p.history.filter((h) => h && h.text).map((h) => ({ at: String(h.at || now), text: String(h.text) }))
+        .sort((x, y) => y.at.localeCompare(x.at) || x.text.localeCompare(y.text))
+      : [],
     createdAt: String(p.createdAt || now),
+    updatedAt: String(p.updatedAt || p.createdAt || now),
     lastOpenedAt: p.lastOpenedAt ? String(p.lastOpenedAt) : null,
   };
 }
 
+// 專案依 id、刪除紀錄依 id 排序，路徑和完成紀錄也排好，同樣的內容永遠產生同樣的 JSON
 function normalize(d) {
-  const projects = Array.isArray(d && d.projects) ? d.projects.filter((p) => p && p.path).map(normalizeProject) : [];
-  return { projects };
+  const byId = (x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
+  const projects = Array.isArray(d && d.projects) ? d.projects.filter((p) => p && (p.path || (p.paths && p.paths.length))).map(normalizeProject).sort(byId) : [];
+  const deleted = Array.isArray(d && d.deleted) ? d.deleted.filter((x) => x && x.id).map((x) => ({ id: String(x.id), at: String(x.at || nowIso()) })).sort(byId) : [];
+  return { projects, deleted };
 }
 
-// 找出 cwd 所屬的專案：路徑相同，或 cwd 在專案資料夾底下（取最深的那個）
-function findByPath(data, cwd) {
+// 找出 cwd 所屬的專案：
+//   1. 路徑相同，或 cwd 在專案資料夾底下（取最深的那個）
+//   2. git remote 相同（另一台電腦 clone 的同一個 repo）
+//   3. 相對於家目錄的路徑相同（例如兩台電腦都是 ~/ClockApp）
+function findByPath(data, cwd, { remote = '', home } = {}) {
   if (!cwd) return null;
   const c = normPath(cwd);
-  let best = null;
+  let best = null, bestLen = -1;
   for (const p of data.projects) {
-    const n = normPath(p.path);
-    if ((c === n || c.startsWith(n + '\\')) && (!best || n.length > normPath(best.path).length)) best = p;
+    for (const x of p.paths) {
+      const n = normPath(x);
+      if ((c === n || c.startsWith(n + '\\')) && n.length > bestLen) { best = p; bestLen = n.length; }
+    }
   }
-  return best;
+  if (best) return best;
+  const r = normRemote(remote);
+  if (r) {
+    const byRemote = data.projects.find((p) => p.remote === r);
+    if (byRemote) return byRemote;
+  }
+  const rel = homeRel(cwd, home);
+  if (rel) return data.projects.find((p) => p.homePaths.includes(rel)) || null;
+  return null;
 }
 
-// 開啟專案：找不到就新增；open 為 true 時更新「上次開啟」時間
-function touch(data, cwd, { open = true } = {}) {
-  let p = findByPath(data, cwd);
+// 記下這台電腦上的路徑（換電腦後第一次開啟時）
+function addPath(p, cwd, home) {
+  const abs = path.resolve(String(cwd));
+  p.path = abs;
+  p.paths = uniqPaths([abs, ...p.paths]);
+  p.homePaths = uniq([...p.homePaths, homeRel(abs, home)]);
+}
+
+// 開啟專案：找不到就新增；open 為 true 時更新「上次開啟」時間。
+// 用 remote／家目錄路徑認到的專案，會把這次的 cwd 記成新路徑。
+function touch(data, cwd, { open = true, remote = '', home } = {}) {
+  let p = findByPath(data, cwd, { remote, home });
   if (!p) {
     p = normalizeProject({ path: path.resolve(String(cwd)) });
     data.projects.push(p);
+  } else if (!p.paths.some((x) => { const n = normPath(x), c = normPath(cwd); return c === n || c.startsWith(n + '\\'); })) {
+    addPath(p, cwd, home);
   }
-  if (open) p.lastOpenedAt = new Date().toISOString();
+  if (remote && !p.remote) p.remote = normRemote(remote);
+  if (open) p.lastOpenedAt = nowIso();
   return p;
 }
 
-const EDITABLE = ['name', 'path', 'progress', 'next', 'remind'];
+const EDITABLE = ['name', 'progress', 'next', 'remind'];
 
 function update(data, id, patch) {
   const p = data.projects.find((x) => x.id === id);
   if (!p || !patch) return false;
+  let changed = false;
   for (const k of EDITABLE) {
     if (!(k in patch)) continue;
-    p[k] = k === 'remind' ? !!patch[k] : String(patch[k]);
+    const v = k === 'remind' ? !!patch[k] : String(patch[k]);
+    if (p[k] !== v) { p[k] = v; changed = true; }
   }
-  return true;
+  if (changed) p.updatedAt = nowIso();
+  return changed;
 }
 
 // 「下一步」完成：移到完成紀錄（最新的在最前面），清空下一步
 function completeNext(p) {
   const text = p.next.trim();
   if (!text) return false;
-  p.history.unshift({ at: new Date().toISOString(), text });
+  p.history.unshift({ at: nowIso(), text });
   p.next = '';
+  p.updatedAt = nowIso();
   return true;
 }
 
 function remove(data, id) {
   const before = data.projects.length;
   data.projects = data.projects.filter((x) => x.id !== id);
-  return data.projects.length !== before;
+  if (data.projects.length === before) return false;
+  data.deleted = [...(data.deleted || []).filter((x) => x.id !== id), { id, at: nowIso() }];
+  return true;
 }
 
-module.exports = { normPath, normalize, normalizeProject, findByPath, touch, update, completeNext, remove };
+// 兩份資料合併（同步資料夾被另一台電腦改過、或匯入時用）。
+// 同一個專案：id 相同，或 remote 相同，或有共同路徑／家目錄路徑。
+// 內容取 updatedAt 比較新的那份；路徑、完成紀錄取聯集；lastOpenedAt 取較新的。
+function merge(a, b) {
+  const A = normalize(a), B = normalize(b);
+  const deleted = new Map();
+  for (const d of [...A.deleted, ...B.deleted]) if (!deleted.has(d.id) || deleted.get(d.id) < d.at) deleted.set(d.id, d.at);
+
+  // 結果不能跟合併順序有關（merge(a,b) 和 merge(b,a) 要一樣），
+  // 否則兩台電腦會互相覺得「對方的版本不一樣」，一直改寫同步資料夾裡的檔案。
+  const out = A.projects.map((p) => ({ ...p }));
+  const same = (p, q) => p.id === q.id || (p.remote && p.remote === q.remote)
+    || p.paths.some((x) => q.paths.some((y) => normPath(x) === normPath(y)))
+    || p.homePaths.some((x) => x && q.homePaths.includes(x));
+
+  for (const q of B.projects) {
+    const i = out.findIndex((p) => same(p, q));
+    if (i < 0) { out.push({ ...q }); continue; }
+    const p = out[i];
+    // 內容取比較新的；一樣新就取 JSON 比較大的（只是為了固定結果）
+    const newer = q.updatedAt !== p.updatedAt ? (q.updatedAt > p.updatedAt ? q : p)
+      : (JSON.stringify(q) > JSON.stringify(p) ? q : p);
+    const seen = new Set();
+    out[i] = {
+      ...newer,
+      id: p.id < q.id ? p.id : q.id,
+      paths: [...p.paths, ...q.paths],
+      homePaths: [...p.homePaths, ...q.homePaths],
+      remote: [p.remote, q.remote].filter(Boolean).sort()[0] || '',
+      history: [...p.history, ...q.history]
+        .filter((h) => { const k = h.at + '|' + h.text; return !seen.has(k) && seen.add(k); }),
+      createdAt: p.createdAt < q.createdAt ? p.createdAt : q.createdAt,
+      lastOpenedAt: [p.lastOpenedAt, q.lastOpenedAt].filter(Boolean).sort().pop() || null,
+    };
+  }
+  // 刪除紀錄比最後修改還新的專案才算刪除
+  const projects = out.filter((p) => !(deleted.has(p.id) && deleted.get(p.id) >= p.updatedAt));
+  return normalize({ projects, deleted: [...deleted].map(([id, at]) => ({ id, at })) });
+}
+
+// 用來比較兩份資料內容是否相同（不管順序）
+function canon(d) {
+  const n = normalize(d);
+  return JSON.stringify({ projects: n.projects, deleted: n.deleted });
+}
+
+module.exports = { normPath, homeRel, normRemote, normalize, normalizeProject, findByPath, touch, addPath, update, completeNext, remove, merge, canon };

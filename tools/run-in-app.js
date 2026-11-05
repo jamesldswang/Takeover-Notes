@@ -11,8 +11,9 @@
 //   - runCli(args)    用 node 執行 cli.js，回傳 { code, stdout, stderr }
 // 回傳值會以 JSON 印成一行 `RESULT {...}`。
 //
-// 用獨立的暫存資料夾當 userData、用另一個 port，不會動到使用者真正的筆記。
-// 執行前要先關掉正在跑的專案筆記 App，否則單一實例鎖會讓這個程式直接結束。
+// 用獨立的暫存資料夾當 userData、Claude Code 設定資料夾（CLAUDE_CONFIG_DIR）、用另一個 port，
+// 不會動到使用者真正的筆記和 Claude Code 設定。測試檔可以拿到 claudeDir 檢查 settings.json。
+// 執行前要先關掉正在跑的接管筆記 App，否則單一實例鎖會讓這個程式直接結束。
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -25,11 +26,13 @@ if (!testFile) { console.error('用法：electron tools/run-in-app.js <測試檔
 const ROOT = path.join(__dirname, '..');
 const port = String(47390 + Math.floor(Math.random() * 9));
 process.env.PROJECT_NOTES_PORT = port;
-process.env.PROJECT_NOTES_TEST = '1'; // 測試時不寫剪貼簿
+process.env.PROJECT_NOTES_TEST = '1'; // 測試時不寫剪貼簿、不搬舊資料
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-test-'));
-app.setPath('userData', userData);
+const claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-claude-'));
+process.env.CLAUDE_CONFIG_DIR = claudeDir;
 shell.openPath = async () => ''; // 不要真的打開檔案總管
 require(path.join(ROOT, 'main.js'));
+app.setPath('userData', userData); // 要在 main.js 的 app.setName() 之後設，否則會被蓋回 %APPDATA%\接管筆記
 
 function runNode(script, args, stdin) {
   return new Promise((resolve) => {
@@ -53,7 +56,7 @@ app.whenReady().then(async () => {
   try {
     const test = require(path.resolve(testFile));
     const result = await test({
-      win, port, userData,
+      win, port, userData, claudeDir,
       page: (js) => win.webContents.executeJavaScript(js),
       runHook: (input) => runNode('hook.js', [], input),
       runCli: (args) => runNode('cli.js', args),

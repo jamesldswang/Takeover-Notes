@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>專案筆記</title>
+    <title>接管筆記</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📝</text></svg>">
     <style>
         * {
@@ -201,6 +201,24 @@
         .launcher-error { color: #ff453a; font-size: 12px; padding: 0 16px; }
         .launcher-error:not(:empty) { padding-bottom: 6px; }
         .launcher-empty { color: #636366; font-size: 13px; padding: 20px 12px; line-height: 1.7; }
+        .launcher-banner {
+            margin: 0 14px 6px; padding: 8px 12px; border-radius: 10px; font-size: 12px; line-height: 1.5;
+            background: rgba(255, 204, 0, 0.12); color: #ffd60a; display: flex; align-items: center; gap: 10px;
+        }
+        .launcher-banner:empty { display: none; }
+        .launcher-banner span { flex: 1; }
+        .missing { color: #ff9f0a; }
+
+        /* 設定 */
+        .settings-content { width: 560px; gap: 10px; padding: 18px 20px; }
+        .settings-section { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+        .settings-content .modal-buttons { margin-top: 0; }
+        .settings-text { font-size: 12px; color: #aeaeb2; line-height: 1.6; }
+        .settings-path { font-size: 12px; color: #fff; background: #1c1c1e; border-radius: 8px; padding: 6px 10px; word-break: break-all; user-select: text; }
+        .settings-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+        .settings-msg { font-size: 12px; color: #30d158; min-height: 16px; }
+        .settings-msg.error { color: #ff453a; }
+        .ok { color: #30d158; }
     </style>
 </head>
 <body>
@@ -211,17 +229,19 @@
             <div class="dot dot-min"></div>
             <div class="dot dot-max"></div>
         </div>
-        <div class="app-title">📝 專案筆記</div>
+        <div class="app-title">📝 接管筆記</div>
         <div class="header-actions">
             <input class="search full-only" id="searchInput" placeholder="搜尋專案…" oninput="renderList()">
             <button class="btn btn-secondary btn-small full-only" onclick="setMode('launcher', true)" title="Esc">⚡ 快速切換</button>
             <button class="btn btn-primary btn-small full-only" onclick="openAddModal()">＋ 新增專案</button>
             <button class="btn btn-secondary btn-small launcher-only" onclick="openNotes()" title="Tab">📋 管理筆記</button>
+            <button class="btn btn-secondary btn-small" onclick="openSettings()" title="設定：連接 Claude Code、資料位置、換電腦">⚙</button>
         </div>
     </div>
     <div class="launcher-view">
         <input class="launcher-search" id="launcherInput" placeholder="輸入專案名稱，或貼上資料夾路徑…" autocomplete="off"
                oninput="launcherIndex = 0; renderLauncher()" onkeydown="launcherKey(event)">
+        <div class="launcher-banner" id="hookBanner"></div>
         <div class="launcher-error" id="launcherError"></div>
         <div class="launcher-list" id="launcherList"></div>
         <div class="launcher-footer">
@@ -253,6 +273,44 @@
             <div class="modal-buttons">
                 <button class="btn btn-secondary" onclick="closeModal('addModal')">取消</button>
                 <button class="btn btn-primary" onclick="addProject()">新增</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 設定 -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content settings-content">
+            <div class="modal-title">⚙ 設定</div>
+
+            <div class="settings-section">
+                <div class="section-label">Claude Code 整合</div>
+                <div class="settings-text" id="hookStatus"></div>
+                <div class="settings-buttons" id="hookButtons"></div>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-label">資料位置</div>
+                <div class="settings-path" id="dataPath"></div>
+                <div class="settings-text">想在兩台電腦接續工作：把資料放到 <b>OneDrive／Dropbox／Google 雲端硬碟</b> 的資料夾，另一台電腦也選同一個資料夾，筆記就會自動合併同步。</div>
+                <div class="settings-buttons">
+                    <button class="btn btn-secondary btn-small" onclick="chooseDataDir()">更改資料夾…</button>
+                    <button class="btn btn-secondary btn-small" id="resetDataBtn" onclick="resetDataDir()">改回預設位置</button>
+                    <button class="btn btn-secondary btn-small" onclick="api.openDataDir()">📂 打開</button>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-label">匯出／匯入（用隨身碟或 Email 搬到另一台電腦）</div>
+                <div class="settings-text">匯入會和現有的筆記合併，不會覆蓋。同一個專案在兩台電腦的路徑不同也沒關係：會用 git remote 或「使用者資料夾底下的位置」認出來。</div>
+                <div class="settings-buttons">
+                    <button class="btn btn-secondary btn-small" onclick="exportData()">匯出…</button>
+                    <button class="btn btn-secondary btn-small" onclick="importData()">匯入…</button>
+                </div>
+            </div>
+
+            <div class="settings-msg" id="settingsMsg"></div>
+            <div class="modal-buttons">
+                <button class="btn btn-primary" onclick="closeModal('settingsModal')">完成</button>
             </div>
         </div>
     </div>
@@ -294,7 +352,7 @@
 
 <script>
     // ---------- 資料存取 ----------
-    // 在 App 裡用 window.__notesApp（資料由 main.js 存在 %APPDATA%\專案筆記\notes.json）；
+    // 在 App 裡用 window.__notesApp（資料由 main.js 存在 %APPDATA%\接管筆記\notes.json，或使用者選的同步資料夾）；
     // 直接用瀏覽器打開這個檔案時，改用 localStorage，功能一樣能用。
     const api = window.__notesApp || localApi();
 
@@ -326,6 +384,10 @@
             onReminder() {}, onReminderCancel() {}, answerReminder() {},
             launchClaude: async () => ({ ok: false, error: '只有在 App 裡才能開啟 Claude Code' }),
             setMode() {}, onMode() {}, hide() {},
+            getSettings: () => null, onOpenSettings() {}, openDataDir() {},
+            connectClaude: async () => ({ ok: false, error: '只有在 App 裡才能設定' }),
+            disconnectClaude: async () => ({ ok: false }), chooseDataDir: async () => ({ ok: false }),
+            resetDataDir: async () => ({ ok: false }), exportData: async () => ({ ok: false }), importData: async () => ({ ok: false }),
             show() {}, pin() {}, unpin() {},
         };
     }
@@ -345,6 +407,14 @@
         if (diff < 86400) return `${Math.floor(diff / 3600)} 小時前開啟`;
         if (diff < 86400 * 7) return `${Math.floor(diff / 86400)} 天前開啟`;
         return fmtDate(iso) + ' 開啟';
+    }
+
+    // 路徑：顯示這台電腦上找得到的那個（main.js 給的 localPath）；
+    // 都找不到（例如別台電腦的專案）就顯示記錄的路徑，加上提示。瀏覽器版沒有 localPath，直接顯示。
+    const shownPath = p => p.localPath || p.path;
+    function pathHtml(p) {
+        if (p.localPath !== '') return escapeHtml(shownPath(p));
+        return `${escapeHtml(p.path)} <span class="missing">· 這台電腦找不到</span>`;
     }
 
     function fmtDate(iso) {
@@ -400,7 +470,7 @@
                 <div>
                     <input class="name-input" id="nameInput" value="${escapeHtml(p.name)}" oninput="queueEdit('name', this.value)" placeholder="專案名稱">
                     <div class="path-row">
-                        <span class="path-text" id="pathText" title="${escapeHtml(p.path)}">${escapeHtml(p.path)}</span>
+                        <span class="path-text" id="pathText"></span>
                         <button class="icon-btn" onclick="api.openFolder('${p.id}')" title="用檔案總管打開">📂 開啟</button>
                         <button class="icon-btn" onclick="openClaude('${p.id}', false)" title="在這個資料夾開新的 Claude Code">▶ Claude Code</button>
                         <button class="icon-btn" onclick="openClaude('${p.id}', true)" title="claude --continue">↻ 接續上次對話</button>
@@ -432,9 +502,10 @@
             setIfIdle('progressInput', p.progress);
             setIfIdle('nextInput', p.next);
             document.getElementById('remindInput').checked = p.remind;
-            const pt = document.getElementById('pathText');
-            pt.textContent = p.path; pt.title = p.path;
         }
+        const pt = document.getElementById('pathText');
+        pt.innerHTML = pathHtml(p);
+        pt.title = (p.paths || [p.path]).join('\n');
         const nextNow = edits.next !== undefined ? edits.next : p.next;
         document.getElementById('completeBtn').disabled = !nextNow.trim();
         document.getElementById('openedText').textContent = relTime(p.lastOpenedAt);
@@ -524,7 +595,7 @@
 
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
-            const open = ['addModal', 'confirmModal'].filter(id => document.getElementById(id).classList.contains('show'));
+            const open = ['addModal', 'confirmModal', 'settingsModal'].filter(id => document.getElementById(id).classList.contains('show'));
             if (open.length) open.forEach(closeModal);
             else if (mode === 'full' && !reminders.length) setMode('launcher', true); // 完整筆記按 Esc 回快速切換
         }
@@ -543,6 +614,8 @@
         document.getElementById('win').classList.toggle('launcher', m === 'launcher');
         if (tellMain) api.setMode(m);
         if (m === 'launcher') {
+            closeModal('settingsModal');
+            renderHookBanner();
             const input = document.getElementById('launcherInput');
             input.value = '';
             launcherIndex = 0;
@@ -565,7 +638,7 @@
         const items = sortedProjects()
             .filter(p => !q || [p.name, p.path, p.next].some(s => s.toLowerCase().includes(q)))
             .map(p => ({ type: 'project', p }));
-        if (looksLikePath(raw) && !projects.some(p => pathKey(p.path) === pathKey(raw)))
+        if (looksLikePath(raw) && !projects.some(p => (p.paths || [p.path]).some(x => pathKey(x) === pathKey(raw))))
             items.push({ type: 'new', path: raw });
         return items;
     }
@@ -597,7 +670,7 @@
                             <span class="launcher-time">${relTime(p.lastOpenedAt)}</span>
                         </div>
                         <div class="launcher-sub ${next ? 'has-next' : ''}">${escapeHtml(sub)}</div>
-                        <div class="launcher-path">${escapeHtml(p.path)}</div>
+                        <div class="launcher-path">${pathHtml(p)}</div>
                     </div>
                     <div class="launcher-actions">
                         <button class="icon-btn" title="看筆記（Tab）" onclick="event.stopPropagation(); openNotes(${i})">✎ 筆記</button>
@@ -661,6 +734,76 @@
 
     api.onMode((m) => setMode(m, false));
 
+    // ---------- 設定（Claude Code 整合、資料位置、換電腦）----------
+    function renderHookBanner() {
+        const s = api.getSettings();
+        const el = document.getElementById('hookBanner');
+        if (!s || s.hook.state === 'connected') { el.innerHTML = ''; return; }
+        const text = {
+            missing: '還沒連接 Claude Code：在 Claude Code 開啟專案時不會提醒你下一步。',
+            outdated: 'Claude Code 連接的是別的位置的接管筆記（可能搬過資料夾或換了電腦）。',
+            error: 'Claude Code 的設定檔格式有問題，無法自動連接。',
+        }[s.hook.state];
+        el.innerHTML = `<span>⚠ ${text}</span>` + (s.hook.state === 'error' ? ''
+            : `<button class="btn btn-primary btn-small" onclick="connectClaude()">${s.hook.state === 'outdated' ? '重新連接' : '連接'}</button>`);
+    }
+
+    function renderSettings() {
+        const s = api.getSettings();
+        if (!s) return;
+        const st = document.getElementById('hookStatus');
+        const btns = document.getElementById('hookButtons');
+        if (s.hook.state === 'connected') {
+            st.innerHTML = '<span class="ok">✓ 已連接。</span>在 Claude Code 開啟專案時，會自動記錄並提醒下一步。';
+            btns.innerHTML = '<button class="btn btn-secondary btn-small" onclick="disconnectClaude()">中斷連接</button>';
+        } else if (s.hook.state === 'error') {
+            st.innerHTML = `<span class="missing">設定檔讀不懂，沒有修改：</span>${escapeHtml(s.hook.file)}<br>${escapeHtml(s.hook.error)}`;
+            btns.innerHTML = '';
+        } else {
+            st.innerHTML = s.hook.state === 'outdated'
+                ? '<span class="missing">連接的是別的位置的接管筆記。</span>按「重新連接」改成這一個。'
+                : '還沒連接。連接後，在 Claude Code 開啟專案時會自動記錄並提醒下一步（會在 Claude Code 的 settings.json 加一個 SessionStart hook，原本的設定會保留並備份）。';
+            btns.innerHTML = `<button class="btn btn-primary btn-small" onclick="connectClaude()">${s.hook.state === 'outdated' ? '重新連接' : '連接 Claude Code'}</button>`;
+        }
+        document.getElementById('dataPath').textContent = s.dataFile + (s.usingDefault ? '（預設）' : '');
+        document.getElementById('resetDataBtn').style.display = s.usingDefault ? 'none' : '';
+    }
+
+    function settingsMsg(text, isError) {
+        const el = document.getElementById('settingsMsg');
+        el.textContent = text || '';
+        el.classList.toggle('error', !!isError);
+    }
+
+    function openSettings() {
+        flushEdits();
+        if (mode !== 'full') { setMode('full', true); }
+        settingsMsg('');
+        renderSettings();
+        openModal('settingsModal');
+    }
+
+    async function settingsAction(fn, okText) {
+        const r = await fn();
+        if (r && r.ok) settingsMsg(typeof okText === 'function' ? okText(r) : okText);
+        else if (r && r.error) settingsMsg(r.error, true);
+        renderSettings();
+        renderHookBanner();
+        projects = api.list();
+        renderList(); renderDetail(false);
+        if (mode === 'launcher') renderLauncher();
+        return r;
+    }
+
+    const connectClaude = () => settingsAction(api.connectClaude, '已連接 Claude Code。下次開啟專案就會生效。');
+    const disconnectClaude = () => settingsAction(api.disconnectClaude, '已中斷連接。');
+    const chooseDataDir = () => settingsAction(api.chooseDataDir, '已改用新的資料夾（如果那裡已經有筆記，已經合併）。');
+    const resetDataDir = () => settingsAction(api.resetDataDir, '已改回預設位置。');
+    const exportData = () => settingsAction(api.exportData, r => '已匯出到 ' + r.file);
+    const importData = () => settingsAction(api.importData, r => `已匯入並合併，現在共有 ${r.total} 個專案（新增 ${r.added} 個）。`);
+
+    api.onOpenSettings(openSettings);
+
     // ---------- 開啟專案時的提醒 ----------
     // hook.js 通知 main.js → main.js 送 reminder 過來 → 使用者按按鈕 → 回覆給 hook.js
     let reminders = []; // [{ reqId, projectId }]
@@ -674,7 +817,7 @@
         selectedId = p.id; renderList(); renderDetail(true);
         document.getElementById('reminderCount').textContent = reminders.length > 1 ? `還有 ${reminders.length - 1} 個專案在等` : '';
         document.getElementById('reminderTitle').textContent = `👋 你打開了「${p.name}」`;
-        document.getElementById('reminderPath').textContent = p.path;
+        document.getElementById('reminderPath').textContent = shownPath(p);
         document.getElementById('reminderProgress').textContent = p.progress.trim() || '（還沒有記錄進度）';
         document.getElementById('reminderNext').value = p.next;
         openModal('reminderModal');

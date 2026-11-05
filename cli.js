@@ -1,4 +1,5 @@
-// 命令列更新專案筆記（Claude Code 裡可以直接叫它記錄進度）。
+// 命令列更新接管筆記（Claude Code 裡可以直接叫它記錄進度）。
+// 打包版：「接管筆記.exe --cli 參數…」；原始碼：「node cli.js 參數…」
 //
 //   node cli.js                                   顯示目前資料夾所屬專案的筆記
 //   node cli.js --progress "登入頁完成" --next "串接 API"
@@ -24,7 +25,7 @@ function parseArgs(argv) {
 }
 
 function show(p) {
-  if (!p) return console.log('這個資料夾還沒有專案筆記。');
+  if (!p) return console.log('這個資料夾還沒有接管筆記。');
   console.log(`專案：${p.name}\n路徑：${p.path}\n現在的進度：${p.progress || '（未記錄）'}\n下一步：${p.next || '（未記錄）'}`);
   if (p.history.length) console.log('完成紀錄：\n' + p.history.slice(0, 5).map((h) => `  ${h.at.slice(0, 10)} ✓ ${h.text}`).join('\n'));
 }
@@ -32,8 +33,8 @@ function show(p) {
 (async () => {
   let opts;
   try { opts = parseArgs(process.argv.slice(2)); } catch (e) { console.error(e.message); process.exit(2); }
-  if (opts.help) { console.log(require('fs').readFileSync(__filename, 'utf8').split('\n').slice(0, 9).join('\n')); return; }
-  if (!(await ensureApp())) { console.error('專案筆記 App 沒有在執行，也無法自動啟動。'); process.exit(1); }
+  if (opts.help) { console.log(require('fs').readFileSync(__filename, 'utf8').split('\n').slice(0, 10).join('\n')); return; }
+  if (!(await ensureApp())) { console.error('接管筆記 App 沒有在執行，也無法自動啟動。'); process.exit(1); }
   const cwd = opts.cwd || process.cwd();
   const isUpdate = opts.done || ['progress', 'next', 'name'].some((k) => k in opts);
   const res = isUpdate

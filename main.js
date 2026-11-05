@@ -1,17 +1,39 @@
-const { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, screen, shell, clipboard } = require('electron');
+const path = require('path');
+
+// ---------- 命令列模式 ----------
+// 「接管筆記.exe --hook」：Claude Code 的 SessionStart hook；「接管筆記.exe --cli ...」：命令列更新筆記。
+// Electron 主程式讀不到 stdin，所以用 Node 模式（ELECTRON_RUN_AS_NODE）再執行自己一次，
+// stdin／stdout 直接繼承。這樣另一台電腦不用安裝 Node.js。
+{
+  const flag = ['--hook', '--cli'].find((f) => process.argv.includes(f));
+  if (flag) {
+    const { spawnSync } = require('child_process');
+    const script = path.join(__dirname, flag === '--hook' ? 'hook.js' : 'cli.js');
+    const r = spawnSync(process.execPath, [script, ...process.argv.slice(process.argv.indexOf(flag) + 1)], {
+      stdio: 'inherit', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    });
+    process.exit(r.status == null ? 0 : r.status);
+  }
+}
+
+const { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, screen, shell, clipboard, dialog } = require('electron');
 const fs = require('fs');
 const http = require('http');
 const os = require('os');
-const path = require('path');
 const { spawn } = require('child_process');
 const store = require('./store');
+const claudeSetup = require('./claude-setup');
 
+const APP_NAME = '接管筆記';
 const HOTKEY = 'Control+Alt+N'; // Fn 鍵 Windows 偵測不到，所以用 Ctrl+Alt+N
 const PORT = Number(process.env.PROJECT_NOTES_PORT) || 47321; // hook.js / cli.js 用這個 port 跟 App 溝通
 // 兩種模式：launcher = 快速切換（Ctrl+Alt+N 一叫出來就是這個），full = 完整筆記
 // 尺寸要和 notes.html 的 .window／.window.launcher 一致
 const SIZES = { launcher: [600, 440], full: [760, 580] };
 const REMINDER_TIMEOUT_MS = 90 * 1000; // 提醒視窗沒人回應就當成「稍後」（hook 的 timeout 是 120 秒）
+const SYNC_POLL_MS = 3000;             // 多久檢查一次資料檔有沒有被別台電腦改過（同步資料夾）
+
+app.setName(APP_NAME); // userData 固定在 %APPDATA%\接管筆記（測試會在這之後改掉）
 
 let win, tray, pinned = false, mode = 'launcher';
 
@@ -29,23 +51,61 @@ const APP_CSS = `
   .app-version { margin-left: 10px; font-size: 11px; color: #636366; letter-spacing: 0.3px; }
 `;
 
+// ---------- 設定（資料放哪裡）----------
+// config.json 一定在 userData；notes.json 預設也在 userData，可以改到 OneDrive 之類的同步資料夾。
+const configFile = () => path.join(app.getPath('userData'), 'config.json');
+let config = {};
+
+function loadConfig() {
+  try { config = JSON.parse(fs.readFileSync(configFile(), 'utf8')) || {}; } catch { config = {}; }
+}
+function saveConfig() {
+  fs.mkdirSync(path.dirname(configFile()), { recursive: true });
+  fs.writeFileSync(configFile(), JSON.stringify(config, null, 2), 'utf8');
+}
+const defaultDataDir = () => app.getPath('userData');
+const dataDir = () => config.dataDir || defaultDataDir();
+const dataFile = () => path.join(dataDir(), 'notes.json');
+
 // ---------- 資料 ----------
-const dataFile = () => path.join(app.getPath('userData'), 'notes.json');
-let data = { projects: [] };
+let data = { projects: [], deleted: [] };
 let saveTimer = null;
+let knownMtime = 0; // 最後一次讀／寫時資料檔的修改時間；不一樣就代表別台電腦改過
+
+function readFileData(file) {
+  return store.normalize(JSON.parse(fs.readFileSync(file, 'utf8').replace(/^﻿/, '')));
+}
+const mtime = (file) => { try { return fs.statSync(file).mtimeMs; } catch { return 0; } };
+
+// 改名前叫「專案筆記」，資料在 %APPDATA%\專案筆記：第一次啟動時搬過來
+function migrateOldData() {
+  if (process.env.PROJECT_NOTES_TEST) return;
+  const oldFile = path.join(app.getPath('appData'), '專案筆記', 'notes.json');
+  const newFile = path.join(defaultDataDir(), 'notes.json');
+  if (!config.dataDir && !fs.existsSync(newFile) && fs.existsSync(oldFile)) {
+    fs.mkdirSync(path.dirname(newFile), { recursive: true });
+    fs.copyFileSync(oldFile, newFile);
+  }
+}
 
 function loadData() {
-  try { data = store.normalize(JSON.parse(fs.readFileSync(dataFile(), 'utf8'))); }
-  catch { data = { projects: [] }; }
+  try { data = readFileData(dataFile()); } catch { data = { projects: [], deleted: [] }; }
+  knownMtime = mtime(dataFile());
 }
 
 function saveNow() {
   clearTimeout(saveTimer); saveTimer = null;
+  const file = dataFile();
   try {
-    fs.mkdirSync(path.dirname(dataFile()), { recursive: true });
-    const tmp = dataFile() + '.tmp';
+    // 寫之前先看別台電腦有沒有改過，有的話先合併，避免蓋掉對方的內容
+    if (mtime(file) && mtime(file) !== knownMtime) {
+      try { data = store.merge(data, readFileData(file)); } catch {}
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = file + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
-    fs.renameSync(tmp, dataFile()); // 先寫暫存檔再改名，寫到一半當掉也不會弄壞原檔
+    fs.renameSync(tmp, file); // 先寫暫存檔再改名，寫到一半當掉也不會弄壞原檔
+    knownMtime = mtime(file);
   } catch (e) { console.error('儲存失敗：', e); }
 }
 
@@ -53,8 +113,142 @@ function saveNow() {
 function changed() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveNow, 300);
-  if (win && !win.isDestroyed()) win.webContents.send('data-changed', data.projects);
+  sendProjects();
 }
+
+// 送給畫面的專案多一個 localPath：這台電腦上存在的路徑（找不到就是空字串）
+function localPath(p) {
+  return [p.path, ...p.paths].find((x) => { try { return fs.existsSync(x); } catch { return false; } }) || '';
+}
+const viewProjects = () => data.projects.map((p) => ({ ...p, localPath: localPath(p) }));
+function sendProjects() {
+  if (win && !win.isDestroyed()) win.webContents.send('data-changed', viewProjects());
+}
+
+// 資料檔被別台電腦（同步資料夾）改過：讀進來合併
+function pollDataFile() {
+  const m = mtime(dataFile());
+  if (!m || m === knownMtime || saveTimer) return;
+  try {
+    const disk = readFileData(dataFile());
+    knownMtime = m;
+    const merged = store.merge(data, disk);
+    const differsFromDisk = store.canon(merged) !== store.canon(disk);
+    data = merged;
+    sendProjects();
+    if (differsFromDisk) changed(); // 本機有對方沒有的內容，寫回去
+  } catch { /* 同步軟體寫到一半，下次再讀 */ }
+}
+
+// ---------- git remote（換電腦時用來認出同一個專案）----------
+function gitRemote(dir) {
+  try {
+    let d = path.resolve(dir);
+    for (;;) {
+      const g = path.join(d, '.git');
+      if (fs.existsSync(g)) {
+        let gitDir = g;
+        if (fs.statSync(g).isFile()) { // worktree／submodule：.git 是一個指向真正 git 資料夾的檔案
+          const m = fs.readFileSync(g, 'utf8').match(/gitdir:\s*(.+)/);
+          if (!m) return '';
+          gitDir = path.resolve(d, m[1].trim());
+        }
+        const cfg = fs.readFileSync(path.join(gitDir, 'config'), 'utf8');
+        const m = cfg.match(/\[remote "origin"\][^[]*?url\s*=\s*(\S+)/);
+        return m ? m[1] : '';
+      }
+      const parent = path.dirname(d);
+      if (parent === d) return '';
+      d = parent;
+    }
+  } catch { return ''; }
+}
+
+const touch = (cwd, opts = {}) => store.touch(data, cwd, { ...opts, remote: gitRemote(cwd) });
+
+// ---------- Claude Code 整合 ----------
+const hookCmd = () => claudeSetup.hookCommand({ execPath: process.execPath, appDir: __dirname, packaged: app.isPackaged });
+
+function settingsInfo() {
+  return {
+    hook: claudeSetup.status(hookCmd()),
+    dataDir: dataDir(),
+    dataFile: dataFile(),
+    defaultDataDir: defaultDataDir(),
+    usingDefault: !config.dataDir,
+  };
+}
+
+// 系統對話框會讓視窗失焦被收起來，開之前先 pin 住
+async function withPinned(fn) {
+  const was = pinned;
+  pinned = true;
+  try { return await fn(); } finally { pinned = was || pendingReminders.size > 0; }
+}
+
+async function chooseDataDir() {
+  return withPinned(async () => {
+    const r = await dialog.showOpenDialog(win, {
+      title: '選擇資料要放的資料夾（例如 OneDrive 裡的資料夾）',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (r.canceled || !r.filePaths[0]) return { ok: false };
+    return setDataDir(r.filePaths[0]);
+  });
+}
+
+// 換資料夾：目標已經有 notes.json（例如另一台電腦放的）就合併
+function setDataDir(dir) {
+  try {
+    const target = path.join(dir, 'notes.json');
+    let merged = data;
+    if (fs.existsSync(target)) merged = store.merge(data, readFileData(target));
+    flushSave();
+    config.dataDir = path.resolve(dir) === path.resolve(defaultDataDir()) ? undefined : path.resolve(dir);
+    saveConfig();
+    data = merged;
+    knownMtime = mtime(target);
+    saveNow();
+    sendProjects();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function exportData() {
+  return withPinned(async () => {
+    const d = new Date(), pad = (n) => String(n).padStart(2, '0');
+    const r = await dialog.showSaveDialog(win, {
+      title: '匯出接管筆記',
+      defaultPath: path.join(app.getPath('documents'), `接管筆記-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}.json`),
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (r.canceled || !r.filePath) return { ok: false };
+    fs.writeFileSync(r.filePath, JSON.stringify(data, null, 2), 'utf8');
+    return { ok: true, file: r.filePath };
+  });
+}
+
+async function importData() {
+  return withPinned(async () => {
+    const r = await dialog.showOpenDialog(win, {
+      title: '匯入接管筆記（會和現有的筆記合併）',
+      filters: [{ name: 'JSON', extensions: ['json'] }], properties: ['openFile'],
+    });
+    if (r.canceled || !r.filePaths[0]) return { ok: false };
+    try {
+      const before = data.projects.length;
+      data = store.merge(data, readFileData(r.filePaths[0]));
+      changed();
+      return { ok: true, added: data.projects.length - before, total: data.projects.length };
+    } catch (e) {
+      return { ok: false, error: '這個檔案不是接管筆記的匯出檔：' + e.message };
+    }
+  });
+}
+
+function flushSave() { if (saveTimer) saveNow(); }
 
 // ---------- 視窗 ----------
 function createWindow() {
@@ -65,6 +259,8 @@ function createWindow() {
     icon: trayIcon(),
     webPreferences: { preload: path.join(__dirname, 'preload.js') },
   });
+  // 測試時視窗會出現在使用者螢幕上；不接收滑鼠，避免使用者剛好移動或點到而影響測試結果
+  if (process.env.PROJECT_NOTES_TEST) win.setIgnoreMouseEvents(true);
   win.loadFile(path.join(__dirname, 'notes.html'));
   win.webContents.on('did-finish-load', () => {
     win.webContents.insertCSS(APP_CSS);
@@ -98,12 +294,13 @@ function claudeExe() {
 const launches = []; // 測試用：記下要開的資料夾，不真的開
 // 用 cmd 的 start 開一個新的主控台視窗，在專案資料夾執行 claude（--continue = 接續上次的對話）
 function launchClaude(p, cont) {
-  if (!fs.existsSync(p.path)) return { ok: false, error: `找不到資料夾：${p.path}` };
-  store.touch(data, p.path);
+  const dir = localPath(p);
+  if (!dir) return { ok: false, error: `這台電腦找不到「${p.name}」的資料夾（記錄的路徑：${p.path}）。把這台電腦上的資料夾路徑貼到搜尋框，按 Enter 就會接上。` };
+  touch(dir);
   changed();
-  if (process.env.PROJECT_NOTES_TEST) { launches.push({ path: p.path, cont: !!cont }); return { ok: true }; }
+  if (process.env.PROJECT_NOTES_TEST) { launches.push({ path: dir, cont: !!cont }); return { ok: true }; }
   const title = ('Claude Code - ' + p.name).replace(/["^&|<>%]/g, '');
-  const cmd = `/d /c start "${title}" /D "${p.path}" "${claudeExe()}"${cont ? ' --continue' : ''}`;
+  const cmd = `/d /c start "${title}" /D "${dir}" "${claudeExe()}"${cont ? ' --continue' : ''}`;
   spawn('cmd.exe', [cmd], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true, windowsHide: true }).unref();
   win.hide();
   return { ok: true };
@@ -166,13 +363,13 @@ function startServer() {
     // 瀏覽器發的請求一定帶 Origin；一律拒絕，避免網頁偷改筆記
     if (req.headers.origin) return reply(403, { error: 'forbidden' });
     try {
-      if (req.method === 'GET' && req.url === '/ping') return reply(200, { ok: true, app: 'project-notes' });
+      if (req.method === 'GET' && req.url === '/ping') return reply(200, { ok: true, app: 'takeover-notes' });
       if (req.method !== 'POST') return reply(404, { error: 'not found' });
       const body = await readBody(req);
 
       if (req.url === '/session-start') {
         if (!body.cwd) return reply(400, { error: 'cwd 必填' });
-        const p = store.touch(data, body.cwd);
+        const p = touch(body.cwd);
         changed();
         const wantsReminder = p.remind && p.next.trim() && ['startup', 'resume', undefined].includes(body.source);
         if (!wantsReminder) return reply(200, { action: 'none', project: p });
@@ -180,13 +377,13 @@ function startServer() {
       }
 
       if (req.url === '/get') {
-        const p = store.findByPath(data, body.cwd || '');
+        const p = store.findByPath(data, body.cwd || '', { remote: gitRemote(body.cwd || '.') });
         return reply(200, { project: p || null });
       }
 
       if (req.url === '/update') {
         if (!body.cwd) return reply(400, { error: 'cwd 必填' });
-        const p = store.findByPath(data, body.cwd) || store.touch(data, body.cwd, { open: false });
+        const p = touch(body.cwd, { open: false });
         if (body.done) store.completeNext(p);
         const patch = {};
         for (const k of ['progress', 'next', 'name']) if (typeof body[k] === 'string') patch[k] = body[k];
@@ -244,11 +441,20 @@ function loginItemArgs() {
 function buildTrayMenu() {
   const exePath = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
   const openAtLogin = app.getLoginItemSettings({ path: exePath, args: loginItemArgs() }).openAtLogin;
+  const hookState = claudeSetup.status(hookCmd()).state;
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: `專案筆記 v${app.getVersion()}`, enabled: false },
+    { label: `${APP_NAME} v${app.getVersion()}`, enabled: false },
     { type: 'separator' },
     { label: '快速切換專案 (Ctrl+Alt+N)', click: () => showWin('launcher') },
     { label: '管理筆記', click: () => showWin('full') },
+    { label: '設定…', click: () => { showWin('full'); win.webContents.send('open-settings'); } },
+    { type: 'separator' },
+    { label: hookState === 'connected' ? '已連接 Claude Code' : '連接 Claude Code（開啟專案時提醒）',
+      type: 'checkbox', checked: hookState === 'connected', click: (item) => {
+        try { item.checked ? claudeSetup.install(hookCmd()) : claudeSetup.uninstall(); }
+        catch (e) { dialog.showErrorBox(APP_NAME, '無法修改 Claude Code 設定：' + e.message); }
+        buildTrayMenu();
+      } },
     { label: '開機自動啟動', type: 'checkbox', checked: openAtLogin, click: (item) => {
         app.setLoginItemSettings({ openAtLogin: item.checked, path: exePath, args: loginItemArgs() });
       } },
@@ -258,15 +464,18 @@ function buildTrayMenu() {
 }
 
 app.whenReady().then(() => {
+  loadConfig();
+  migrateOldData();
   loadData();
+  setInterval(pollDataFile, SYNC_POLL_MS);
 
   ipcMain.on('get-version', (e) => { e.returnValue = app.getVersion(); });
-  ipcMain.on('list', (e) => { e.returnValue = data.projects; });
+  ipcMain.on('list', (e) => { e.returnValue = viewProjects(); });
   ipcMain.on('add', (e, fields) => {
-    const p = store.touch(data, fields.path, { open: false });
-    if (fields.name) p.name = String(fields.name);
+    const p = touch(fields.path, { open: false });
+    if (fields.name) store.update(data, p.id, { name: fields.name });
     changed();
-    e.returnValue = p;
+    e.returnValue = { ...p, localPath: localPath(p) };
   });
   ipcMain.on('update', (_e, id, patch) => { if (store.update(data, id, patch)) changed(); });
   ipcMain.on('complete', (_e, id) => {
@@ -276,7 +485,7 @@ app.whenReady().then(() => {
   ipcMain.on('remove', (_e, id) => { if (store.remove(data, id)) changed(); });
   ipcMain.on('open-folder', (_e, id) => {
     const p = data.projects.find((x) => x.id === id); // 只開清單裡有的專案路徑
-    if (p) shell.openPath(p.path);
+    if (p && localPath(p)) shell.openPath(localPath(p));
   });
   ipcMain.handle('launch-claude', (_e, id, cont) => {
     const p = data.projects.find((x) => x.id === id);
@@ -285,6 +494,22 @@ app.whenReady().then(() => {
   ipcMain.on('set-mode', (_e, m) => { if (SIZES[m] && m !== mode) showWin(m); });
   ipcMain.on('reminder-answer', (_e, reqId, action) => finishReminder(reqId, action === 'run' ? 'run' : 'later'));
 
+  // 設定
+  ipcMain.on('get-settings', (e) => { e.returnValue = settingsInfo(); });
+  ipcMain.handle('connect-claude', () => {
+    try { claudeSetup.install(hookCmd()); buildTrayMenu(); return { ok: true }; }
+    catch (e) { return { ok: false, error: 'Claude Code 的 settings.json 格式有問題，沒有修改：' + e.message }; }
+  });
+  ipcMain.handle('disconnect-claude', () => {
+    try { claudeSetup.uninstall(); buildTrayMenu(); return { ok: true }; }
+    catch (e) { return { ok: false, error: e.message }; }
+  });
+  ipcMain.handle('choose-data-dir', () => chooseDataDir());
+  ipcMain.handle('reset-data-dir', () => setDataDir(defaultDataDir()));
+  ipcMain.handle('export-data', () => exportData());
+  ipcMain.handle('import-data', () => importData());
+  ipcMain.on('open-data-dir', () => shell.openPath(dataDir()));
+
   createWindow();
   startServer();
 
@@ -292,7 +517,7 @@ app.whenReady().then(() => {
   const trayImg = trayIcon(16);
   trayImg.addRepresentation({ scaleFactor: 2, width: 32, height: 32, buffer: drawIconBitmap(32) });
   tray = new Tray(trayImg);
-  tray.setToolTip(`專案筆記 v${app.getVersion()} — Ctrl+Alt+N`);
+  tray.setToolTip(`${APP_NAME} v${app.getVersion()} — Ctrl+Alt+N`);
   tray.on('click', toggleWin);
   buildTrayMenu();
 
@@ -308,11 +533,11 @@ app.whenReady().then(() => {
   });
 });
 
-module.exports = { launches }; // 給測試看
+module.exports = { launches, setDataDir, pollDataFile, getData: () => data }; // 給測試用
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
-  if (saveTimer) saveNow();
+  flushSave();
   for (const reqId of [...pendingReminders.keys()]) finishReminder(reqId, 'later');
 });
 app.on('window-all-closed', (e) => e.preventDefault());
