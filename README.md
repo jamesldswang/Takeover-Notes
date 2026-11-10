@@ -1,6 +1,6 @@
 # 📝 接管筆記 Takeover Notes
 
-**版本：1.0.1**　｜　[下載最新版](https://github.com/jamesldswang/Takeover-Notes/releases/latest)
+**版本：1.1.0**　｜　[下載最新版](https://github.com/jamesldswang/Takeover-Notes/releases/latest)
 
 記錄每一個在 Claude Code 開發的專案：**① 現在的進度**、**② 下一步**。程式常駐在系統匣，按 **Ctrl+Alt+N** 叫出快速切換，選專案就直接開啟 Claude Code。
 
@@ -12,10 +12,10 @@
 
 > 系統需求：Windows 10／11 64 位元，已安裝 [Claude Code](https://claude.com/claude-code)。**不需要安裝 Node.js。**
 
-1. 到 [Releases](https://github.com/jamesldswang/Takeover-Notes/releases/latest) 下載 `TakeoverNotes-1.0.1-win-x64.zip`，按右鍵選「解壓縮全部」，放到固定的位置（例如 `C:\Tools\TakeoverNotes`）。
+1. 到 [Releases](https://github.com/jamesldswang/Takeover-Notes/releases/latest) 下載 `TakeoverNotes-1.1.0-win-x64.zip`，按右鍵選「解壓縮全部」，放到固定的位置（例如 `C:\Tools\TakeoverNotes`）。
 2. 打開資料夾，雙擊 **`接管筆記.exe`**。畫面上不會跳出視窗，請看右下角系統匣有沒有出現黃色便條紙圖示。
 3. 按 **Ctrl+Alt+N**，上方會出現黃色提示「還沒連接 Claude Code」，按 **連接**。
-   這會在 Claude Code 的設定（`%USERPROFILE%\.claude\settings.json`）加一個 SessionStart hook，原本的設定都會保留，改之前也會備份成 `settings.json.takeover-notes.bak`。
+   這會在 Claude Code 的設定（`%USERPROFILE%\.claude\settings.json`）加上接管筆記的 hook（SessionStart：開啟時提醒；UserPromptSubmit／Stop／SessionEnd：在背景告訴 App 專案有沒有在動，給閒置提醒用），原本的設定都會保留，改之前也會備份成 `settings.json.takeover-notes.bak`。
 4. 建議在系統匣圖示按右鍵，勾選 **開機自動啟動**。
 
 > 資料夾裡的檔案都要一起保留，不能只複製 `接管筆記.exe` 一個檔案。
@@ -58,7 +58,8 @@
 | ✓ 這一步完成了 | 把目前的「下一步」移到完成紀錄（記下日期），清空讓你寫新的下一步 |
 | 開啟提醒 | 在 Claude Code 開啟（或 resume）專案、而且有「下一步」時，視窗跳出：顯示進度和下一步（下一步可以先修改），按 **▶ 立刻執行** 或 **稍後再說**。90 秒沒回應就當成稍後。每個專案可以取消勾選「在 Claude Code 開啟這個專案時提醒我下一步」 |
 | 立刻執行 | Claude 會收到「使用者要立刻執行這個下一步」；在 Claude Code 隨便輸入一句（例如「開始」）就會動工。同時把「開始執行下一步：…」複製到剪貼簿，也可以直接 Ctrl+V 貼上 |
-| 讓 Claude 幫你記 | 每次開啟專案，Claude 都會拿到這個專案的進度和下一步，也知道怎麼更新筆記。跟 Claude 說「幫我更新接管筆記」，它就會寫回來 |
+| Claude 自動記 | 每次開啟專案，Claude 都會拿到這個專案的進度和下一步，並被要求：**每做完一段工作、停下來等你之前，不用問就自動把「現在進度」和「建議下一步」寫回接管筆記**（下一步做完了會順便記進完成紀錄）。只是回答問題就不會改 |
+| ⏰ 閒置提醒 | Claude 停下來之後，專案 **30 分鐘**沒動（沒有再送訊息、也沒關掉 Claude Code），而且這一輪筆記沒被更新過，就跳出「下一步要記在接管筆記嗎？」，已經先填好 Claude 最後回覆裡的「建議下一步」，可以修改後按 **📝 記下來** 或 **不用**。這個提醒會一直留著直到你回答；你回到 Claude Code 繼續做事時會自動收掉。取消勾選專案的「提醒我下一步」也會關掉閒置提醒 |
 | ⚙ 設定 | 連接／中斷 Claude Code、資料位置（同步資料夾）、匯出／匯入 |
 
 ### App 行為
@@ -110,6 +111,7 @@ node tools/store-test.js                                                        
 ./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/example-test.js     # 提醒流程
 ./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/launcher-test.js    # 快速切換
 ./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/portable-test.js    # 連接 Claude Code、同步資料夾
+./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/idle-test.js        # 自動更新指示、閒置提醒、四個 hook
 ```
 
 修改這個 App 的細節（流程、踩過的坑）寫在 `.claude/skills/takeover-notes/SKILL.md`，用 Claude Code 開這個資料夾時會自動參考。
@@ -135,7 +137,7 @@ Takeover-Notes/
 ├── store.js          # 資料操作：比對專案、合併兩份資料（換電腦／同步用）
 ├── claude-setup.js   # 把 hook 寫進／移出 Claude Code 的 settings.json
 ├── preload.js        # 版號、紅黃點隱藏、提供 window.__notesApp
-├── hook.js           # Claude Code SessionStart hook（接管筆記.exe --hook）
+├── hook.js           # Claude Code hook（接管筆記.exe --hook）：開啟提醒、閒置提醒用的活動回報
 ├── cli.js            # 命令列更新筆記（接管筆記.exe --cli）
 ├── client.js         # hook.js / cli.js 共用：連線到 App，App 沒開就啟動
 ├── build.js          # 打包腳本
@@ -149,7 +151,8 @@ Takeover-Notes/
 
 - **快捷鍵不能用 Fn。** Fn 鍵是筆電鍵盤韌體自己處理的，Windows 收不到。
 - **「立刻執行」不會自己按 Enter。** Claude Code 的 SessionStart hook 只能提供脈絡，沒辦法替你送出第一則訊息，所以還是要在 Claude Code 輸入一句（或貼上剪貼簿）。
-- **進度不會自動產生。** 要自己寫，或請 Claude 更新。
+- **自動記錄靠 Claude 照指示做。** 進度和下一步是 Claude 依照開啟時拿到的指示寫的，偶爾可能漏掉；漏掉的話 30 分鐘後的閒置提醒會補問。閒置提醒的建議是從 Claude 最後一則回覆裡找「下一步」那一段，找不到就沿用原本的下一步。
+- **閒置提醒要先「重新連接」。** 1.0.1 以前連接的只有 SessionStart hook，更新後 Ctrl+Alt+N 會提示「連接的是別的位置」，按 **重新連接** 才會加上新的 hook。App 沒開著的時候不會記錄專案有沒有在動。
 - **同步是「最後修改的贏」。** 兩台電腦在同一個專案、同一時間都改了文字，會留下比較晚改的那份（完成紀錄不會遺失）。
 - 開啟 Claude Code 用的是命令提示字元視窗（`cmd` 的 `start`）。`claude` 優先用 `%USERPROFILE%\.local\bin\claude.exe`，找不到才用 PATH。
 - 本機 HTTP 用 port **47321**，只聽 127.0.0.1，而且拒絕瀏覽器發出的請求。
@@ -157,6 +160,12 @@ Takeover-Notes/
 ---
 
 ## 版本紀錄
+
+### 1.1.0（2026-11-10）
+
+- **Claude 自動更新接管筆記**：開啟專案時給 Claude 的指示改成「每做完一段工作、停下來之前，不用問就把現在進度和建議下一步寫回筆記」，不用再自己說「幫我更新」。
+- **⏰ 閒置 30 分鐘提醒**：Claude 停下來後專案 30 分鐘沒動、筆記也沒更新，就跳出提醒問下一步要不要記下來，並預先填好 Claude 回覆裡的「建議下一步」。
+- 連接 Claude Code 時多加 UserPromptSubmit、Stop、SessionEnd 三個背景（async）hook，不會拖慢 Claude Code。舊版連接的要按一次「重新連接」。
 
 ### 1.0.1（2026-11-05）
 

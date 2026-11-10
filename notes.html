@@ -338,12 +338,12 @@
                 <div class="reminder-progress" id="reminderProgress"></div>
             </div>
             <div>
-                <div class="section-label">下一步（可以先修改再執行）</div>
+                <div class="section-label" id="reminderNextLabel">下一步（可以先修改再執行）</div>
                 <textarea id="reminderNext"></textarea>
             </div>
-            <div class="reminder-hint">按「立刻執行」後，Claude 會收到這個下一步；在 Claude Code 隨便輸入一句（例如「開始」）就會動工。指令也已複製到剪貼簿。</div>
+            <div class="reminder-hint" id="reminderHint">按「立刻執行」後，Claude 會收到這個下一步；在 Claude Code 隨便輸入一句（例如「開始」）就會動工。指令也已複製到剪貼簿。</div>
             <div class="modal-buttons">
-                <button class="btn btn-secondary" onclick="answerReminder('later')">稍後再說</button>
+                <button class="btn btn-secondary" id="reminderLaterBtn" onclick="answerReminder('later')">稍後再說</button>
                 <button class="btn btn-primary" id="reminderRunBtn" onclick="answerReminder('run')">▶ 立刻執行</button>
             </div>
         </div>
@@ -806,7 +806,14 @@
 
     // ---------- 開啟專案時的提醒 ----------
     // hook.js 通知 main.js → main.js 送 reminder 過來 → 使用者按按鈕 → 回覆給 hook.js
-    let reminders = []; // [{ reqId, projectId }]
+    // kind 'open'：開啟專案時（立刻執行／稍後）；kind 'idle'：Claude 停下來 30 分鐘沒動，問下一步要不要記下來
+    let reminders = []; // [{ reqId, projectId, kind, suggestion?, minutes? }]
+    const REMINDER_TEXT = {
+        open: { label: '下一步（可以先修改再執行）', later: '稍後再說', ok: '▶ 立刻執行',
+            hint: '按「立刻執行」後，Claude 會收到這個下一步；在 Claude Code 隨便輸入一句（例如「開始」）就會動工。指令也已複製到剪貼簿。' },
+        idle: { label: '下一步要記在接管筆記嗎？（可以先修改）', later: '不用', ok: '📝 記下來',
+            hint: '已經先填好 Claude 最後建議的下一步。按「記下來」會存成這個專案的下一步，下次打開專案時會提醒你。' },
+    };
 
     function showReminder() {
         const r = reminders[0];
@@ -816,10 +823,16 @@
         if (mode !== 'full') setMode('full', false);
         selectedId = p.id; renderList(); renderDetail(true);
         document.getElementById('reminderCount').textContent = reminders.length > 1 ? `還有 ${reminders.length - 1} 個專案在等` : '';
-        document.getElementById('reminderTitle').textContent = `👋 你打開了「${p.name}」`;
+        const idle = r.kind === 'idle', t = REMINDER_TEXT[idle ? 'idle' : 'open'];
+        document.getElementById('reminderTitle').textContent = idle
+            ? `⏰「${p.name}」已經 ${r.minutes || 30} 分鐘沒動了` : `👋 你打開了「${p.name}」`;
         document.getElementById('reminderPath').textContent = shownPath(p);
         document.getElementById('reminderProgress').textContent = p.progress.trim() || '（還沒有記錄進度）';
-        document.getElementById('reminderNext').value = p.next;
+        document.getElementById('reminderNext').value = idle ? ((r.suggestion || '').trim() || p.next) : p.next;
+        document.getElementById('reminderNextLabel').textContent = t.label;
+        document.getElementById('reminderHint').textContent = t.hint;
+        document.getElementById('reminderLaterBtn').textContent = t.later;
+        document.getElementById('reminderRunBtn').textContent = t.ok;
         openModal('reminderModal');
         document.getElementById('reminderRunBtn').focus();
     }
@@ -829,7 +842,9 @@
         if (!r) return;
         const p = projects.find(x => x.id === r.projectId);
         const next = document.getElementById('reminderNext').value;
-        if (p && next !== p.next) { api.update(p.id, { next }); p.next = next; } // 先存再回覆，hook 才拿得到改過的內容
+        // 開啟提醒：改過就存（先存再回覆，hook 才拿得到改過的內容）；閒置提醒：按「記下來」才存
+        const save = r.kind === 'idle' ? action === 'run' : true;
+        if (p && save && next !== p.next) { api.update(p.id, { next }); p.next = next; }
         api.answerReminder(r.reqId, action);
         showReminder();
     }

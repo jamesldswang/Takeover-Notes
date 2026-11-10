@@ -117,4 +117,23 @@ t('重複：開啟時才查到 remote，也會併成一個', () => {
   assert.ok(p.lastOpenedAt);
 });
 
+t('閒置提醒：從 Claude 的回覆找出建議下一步', () => {
+  const reply = [
+    '還沒 commit 的（v0.3.0 會議模式）', '',
+    '- postprocess.py（新檔）：整理逐字稿。', '  - ⑤離線分辨說話者', '',
+    '建議下一步', '',
+    '1. 實際錄一段多人對話，看說話者分得準不準。',
+    '2. 確認 PyInstaller 打包。', '',
+    '3. 測過之後 commit，打 tag v0.3.0。', '',
+    '另外，接管筆記上記的還是 v0.1.2，已經過時了。要我把它更新嗎？',
+  ].join('\n');
+  assert.strictEqual(s.suggestNext(reply),
+    '1. 實際錄一段多人對話，看說話者分得準不準。\n2. 確認 PyInstaller 打包。\n3. 測過之後 commit，打 tag v0.3.0。');
+  assert.strictEqual(s.suggestNext('完成了。\n\n**下一步：** 寫登入 API\n\n有問題再說。'), '寫登入 API');
+  assert.strictEqual(s.suggestNext('## Next steps\n- add tests\n- deploy\n\n## Notes\nx'), '- add tests\n- deploy');
+  assert.strictEqual(s.suggestNext('都改好了，測試通過。'), '');
+  assert.strictEqual(s.suggestNext('- 下一步要改 X 的部分\n- 其他'), '', '清單項目裡提到下一步不算標題');
+  assert.strictEqual(s.suggestNext(''), '');
+});
+
 console.log(`\n${pass} 個測試全部通過`);

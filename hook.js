@@ -27,7 +27,13 @@ function buildOutput(action, p) {
     `現在的進度：${p.progress.trim() || '（未記錄）'}`,
     `下一步：${p.next.trim() || '（未記錄）'}`,
   ];
-  const howToUpdate = `使用者要你更新接管筆記（專案進度）時，在專案資料夾執行：${cliCommand()} --progress "現在進度" --next "下一步"（加 --done 代表目前的下一步已完成，會記進完成紀錄）。`;
+  const howToUpdate = [
+    `【自動更新接管筆記】每次做完一段工作、要停下來等使用者之前，不用問使用者，直接在專案資料夾執行：${cliCommand()} --progress "現在進度" --next "下一步"`,
+    '- 「現在進度」用一兩句話寫做到哪裡（例如版本、完成了什麼、還沒 commit／還沒測試的部分）。',
+    '- 「下一步」寫你建議的下一步（有好幾步就用 1. 2. 3. 分行）。回覆裡有「建議下一步」的話，內容要一致。',
+    '- 筆記上的「下一步」已經做完時加 --done，它會記進完成紀錄。',
+    '- 只是回答問題、沒有改變進度時不用更新。更新後在回覆最後用一句話告訴使用者「已更新接管筆記」。',
+  ].join('\n');
   let context, systemMessage;
   if (action === 'run') {
     context = [...notes, '',
@@ -44,12 +50,51 @@ function buildOutput(action, p) {
   return out;
 }
 
+// Claude 這一輪最後說的話（Stop 事件用；從中找「建議下一步」）。
+// 新版 Claude Code 的 stdin 直接有 last_assistant_message；沒有就讀對話紀錄檔（JSONL）的最後一段。
+function lastAssistantText(input) {
+  if (typeof input.last_assistant_message === 'string') return input.last_assistant_message;
+  try {
+    const file = input.transcript_path;
+    if (!file) return '';
+    const fs = require('fs');
+    const size = fs.statSync(file).size, len = Math.min(size, 512 * 1024);
+    const buf = Buffer.alloc(len);
+    const fd = fs.openSync(file, 'r');
+    try { fs.readSync(fd, buf, 0, len, size - len); } finally { fs.closeSync(fd); }
+    const lines = buf.toString('utf8').split('\n').reverse();
+    const texts = [];
+    for (const line of lines) {
+      let e; try { e = JSON.parse(line); } catch { continue; }
+      if (e.type === 'user') break;
+      if (e.type !== 'assistant' || !e.message || !Array.isArray(e.message.content)) continue;
+      const blocks = e.message.content;
+      if (blocks.some((b) => b.type === 'tool_use')) break; // 再往前是做事的過程，不是最後的回覆
+      const t = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+      if (t) texts.unshift(t);
+    }
+    return texts.join('\n');
+  } catch { return ''; }
+}
+
+// UserPromptSubmit／Stop／SessionEnd：告訴 App 專案開始做事、停下來或關掉了（30 分鐘閒置提醒用）。
+// 在背景（async hook）執行，App 沒開就算了，不要為此啟動 App；stdout 不輸出任何東西
+// （UserPromptSubmit 的 stdout 會被加進對話）。
+const ACTIVITY = { UserPromptSubmit: 'prompt', Stop: 'stop', SessionEnd: 'end' };
+async function reportActivity(input, cwd, at) {
+  const body = { event: ACTIVITY[input.hook_event_name], cwd, at, sessionId: input.session_id || '' };
+  if (body.event === 'stop') body.lastMessage = lastAssistantText(input).slice(-20000);
+  await request('POST', '/activity', body, 5000);
+}
+
 (async () => {
   try {
+    const at = Date.now(); // 背景執行可能亂序到達，App 用這個時間排先後
     const input = JSON.parse((await readStdin()) || '{}');
     const cwd = input.cwd || process.cwd();
     // 家目錄不是專案，不記錄
     if (path.resolve(cwd).toLowerCase() === path.resolve(os.homedir()).toLowerCase()) return;
+    if (ACTIVITY[input.hook_event_name]) return await reportActivity(input, cwd, at);
     if (!(await ensureApp())) return;
     const res = await request('POST', '/session-start', { cwd, source: input.source }, 115 * 1000);
     const out = buildOutput(res.action, res.project);

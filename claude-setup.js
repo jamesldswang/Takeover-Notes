@@ -1,4 +1,4 @@
-// 把接管筆記的 SessionStart hook 寫進（或移出）Claude Code 的使用者設定 ~/.claude/settings.json。
+// 把接管筆記的 hook（SessionStart、UserPromptSubmit、Stop、SessionEnd）寫進（或移出）Claude Code 的使用者設定 ~/.claude/settings.json。
 // 只在使用者按「連接 Claude Code」時才會執行。
 //
 // hook 指令直接呼叫接管筆記.exe（加 --hook），由 exe 自己用 Node 模式執行 hook.js，
@@ -36,18 +36,30 @@ function read() {
   return { file, settings: JSON.parse(text) }; // 解析失敗就丟錯，絕不覆蓋使用者看不懂的檔案
 }
 
-function ourCommands(settings) {
-  const groups = (settings.hooks && settings.hooks.SessionStart) || [];
-  return groups.flatMap((g) => (g.hooks || []).map((h) => h.command)).filter(isOurs);
-}
+// 要掛的 hook 事件。全部用同一個指令，hook.js 依 stdin 的 hook_event_name 分辨。
+//   SessionStart：開啟專案時提醒（會等使用者回答，所以 timeout 長、不能 async）
+//   UserPromptSubmit／Stop／SessionEnd：只是告訴 App「開始做事／停下來／關掉了」，給 30 分鐘閒置提醒用。
+//     每一輪都會觸發，用 async 在背景跑，不拖慢 Claude Code。
+const EVENTS = {
+  SessionStart: { matcher: 'startup|resume', timeout: HOOK_TIMEOUT },
+  UserPromptSubmit: { timeout: 15, async: true },
+  Stop: { timeout: 15, async: true },
+  SessionEnd: { timeout: 15, async: true },
+};
 
-// 'connected'：已連接且指向目前這個 exe；'outdated'：有接管筆記的 hook 但路徑不對（例如搬了資料夾）；
-// 'missing'：沒有；'error'：settings.json 讀不懂
+const commandsOf = (settings, event) => ((settings.hooks && settings.hooks[event]) || [])
+  .flatMap((g) => (g.hooks || []).map((h) => h.command)).filter(isOurs);
+const ourCommands = (settings) => Object.keys(EVENTS).flatMap((ev) => commandsOf(settings, ev));
+
+// 'connected'：每個事件都已連接且指向目前這個 exe；'outdated'：有接管筆記的 hook 但路徑不對
+// （例如搬了資料夾、換了版本）或少了事件（舊版只有 SessionStart）；'missing'：沒有；'error'：settings.json 讀不懂
 function status(cmd) {
   try {
-    const mine = ourCommands(read().settings);
+    const { settings } = read();
+    const mine = ourCommands(settings);
     if (!mine.length) return { state: 'missing', file: settingsPath() };
-    return { state: mine.includes(cmd) ? 'connected' : 'outdated', file: settingsPath(), current: mine };
+    const complete = Object.keys(EVENTS).every((ev) => commandsOf(settings, ev).includes(cmd));
+    return { state: complete ? 'connected' : 'outdated', file: settingsPath(), current: [...new Set(mine)] };
   } catch (e) {
     return { state: 'error', file: settingsPath(), error: e.message };
   }
@@ -55,11 +67,14 @@ function status(cmd) {
 
 // 移除舊的接管筆記 hook（保留使用者其他的 hook），沒剩東西的群組也一起拿掉
 function stripOurs(settings) {
-  if (!settings.hooks || !Array.isArray(settings.hooks.SessionStart)) return;
-  settings.hooks.SessionStart = settings.hooks.SessionStart
-    .map((g) => ({ ...g, hooks: (g.hooks || []).filter((h) => !isOurs(h.command)) }))
-    .filter((g) => g.hooks.length);
-  if (!settings.hooks.SessionStart.length) delete settings.hooks.SessionStart;
+  if (!settings.hooks) return;
+  for (const ev of Object.keys(EVENTS)) {
+    if (!Array.isArray(settings.hooks[ev])) continue;
+    settings.hooks[ev] = settings.hooks[ev]
+      .map((g) => ({ ...g, hooks: (g.hooks || []).filter((h) => !isOurs(h.command)) }))
+      .filter((g) => g.hooks.length);
+    if (!settings.hooks[ev].length) delete settings.hooks[ev];
+  }
   if (!Object.keys(settings.hooks).length) delete settings.hooks;
 }
 
@@ -75,11 +90,10 @@ function install(cmd) {
   const { file, settings } = read();
   stripOurs(settings);
   settings.hooks = settings.hooks || {};
-  settings.hooks.SessionStart = settings.hooks.SessionStart || [];
-  settings.hooks.SessionStart.push({
-    matcher: 'startup|resume',
-    hooks: [{ type: 'command', command: cmd, timeout: HOOK_TIMEOUT }],
-  });
+  for (const [ev, { matcher, ...opts }] of Object.entries(EVENTS)) {
+    settings.hooks[ev] = settings.hooks[ev] || [];
+    settings.hooks[ev].push({ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command: cmd, ...opts }] });
+  }
   write(file, settings);
 }
 
@@ -90,4 +104,4 @@ function uninstall() {
   write(file, settings);
 }
 
-module.exports = { settingsPath, hookCommand, isOurs, status, install, uninstall, HOOK_TIMEOUT };
+module.exports = { settingsPath, hookCommand, isOurs, status, install, uninstall, HOOK_TIMEOUT, EVENTS };

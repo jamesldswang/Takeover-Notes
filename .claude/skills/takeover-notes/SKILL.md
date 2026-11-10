@@ -59,7 +59,16 @@ node tools/store-test.js                                                        
 ./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/example-test.js     # 開啟 → 記錄 → 提醒 → 立刻執行 → 完成
 ./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/launcher-test.js    # 快速切換
 ./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/portable-test.js    # 連接 Claude Code、同步資料夾、兩台同時改
+./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/idle-test.js        # 自動更新指示、閒置提醒（run-in-app 把 30 分鐘縮成 1.5 秒）、四個 hook 事件
 ```
+
+### 閒置提醒（1.0.1 之後）
+
+- `claude-setup.js` 的 `EVENTS` 掛四個事件，同一個指令：SessionStart（會等回答，不能 async）、UserPromptSubmit／Stop／SessionEnd（`async: true` 背景跑，因為 exe 每次要 ~0.9 秒）。`status()` 要四個都在才算 `connected`。
+- `hook.js` 依 `hook_event_name` 分流：活動事件 POST `/activity { event: prompt|stop|end, cwd, at, sessionId, lastMessage }`，**不啟動 App、stdout 不輸出**（UserPromptSubmit 的 stdout 會進對話）。`lastMessage` 取 stdin 的 `last_assistant_message`，沒有就讀 `transcript_path` 最後一段。
+- `main.js` 的 `onActivity()`／`idleFired()`：背景 hook 可能亂序，用 `at` 排先後；stop 後 `IDLE_MS`（30 分鐘，`PROJECT_NOTES_IDLE_MS` 可改）沒 prompt／end，且 `p.updatedAt` 早於這輪開始，才 `askReminder(p, 'idle', { suggestion, minutes })`。idle 提醒不逾時；又有 prompt 時自動收掉。
+- 建議下一步由 `store.suggestNext(text)` 從回覆找「下一步」段落。
+- SessionStart 的 `additionalContext`（`buildOutput()`）要求 Claude 每次停下前自動用 cli 更新進度和下一步。
 
 - `run-in-app.js` 的測試檔是 Node 模組：`module.exports = async ({ page, runHook, runCli, win, port, userData, claudeDir }) => 結果`。結果會印成一行 `RESULT {...}`。
   - `page(js)`：在 `notes.html` 裡執行 JS，可以直接用頁面的全域函式和變數（`projects`、`selectProject()`、`answerReminder()`…）。

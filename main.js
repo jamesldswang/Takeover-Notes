@@ -32,6 +32,8 @@ const PORT = Number(process.env.PROJECT_NOTES_PORT) || 47321; // hook.js / cli.j
 const SIZES = { launcher: [600, 440], full: [760, 580] };
 const REMINDER_TIMEOUT_MS = 90 * 1000; // 提醒視窗沒人回應就當成「稍後」（hook 的 timeout 是 120 秒）
 const SYNC_POLL_MS = 3000;             // 多久檢查一次資料檔有沒有被別台電腦改過（同步資料夾）
+// Claude 停下來之後，專案多久沒動就提醒「下一步要不要記下來」（測試可用環境變數縮短）
+const IDLE_MS = Number(process.env.PROJECT_NOTES_IDLE_MS) || 30 * 60 * 1000;
 
 app.setName(APP_NAME); // userData 固定在 %APPDATA%\接管筆記（測試會在這之後改掉）
 
@@ -318,11 +320,13 @@ function launchClaude(p, cont) {
 const pendingReminders = new Map(); // reqId -> { projectId, resolve, timer, sent }
 let reminderSeq = 0;
 
-function askReminder(project) {
+// kind：'open' = 開啟專案時（hook 在等回答，90 秒逾時）；
+//       'idle' = Claude 停下來 30 分鐘沒動（沒有人在等，不逾時，一直留到使用者回答或專案又開始動）
+function askReminder(project, kind = 'open', extra = {}) {
   return new Promise((resolve) => {
     const reqId = String(++reminderSeq);
-    const timer = setTimeout(() => finishReminder(reqId, 'timeout'), REMINDER_TIMEOUT_MS);
-    pendingReminders.set(reqId, { projectId: project.id, resolve, timer, sent: false });
+    const timer = kind === 'open' ? setTimeout(() => finishReminder(reqId, 'timeout'), REMINDER_TIMEOUT_MS) : null;
+    pendingReminders.set(reqId, { projectId: project.id, kind, extra, resolve, timer, sent: false });
     pinned = true;
     showWin('full');
     flushReminders();
@@ -334,8 +338,56 @@ function flushReminders() {
   for (const [reqId, r] of pendingReminders) {
     if (r.sent) continue;
     r.sent = true;
-    win.webContents.send('reminder', { reqId, projectId: r.projectId });
+    win.webContents.send('reminder', { reqId, projectId: r.projectId, kind: r.kind, ...r.extra });
   }
+}
+
+// ---------- 閒置提醒 ----------
+// hook.js 在 UserPromptSubmit／Stop／SessionEnd 時送 /activity 過來。
+// Claude 停下來（stop）後 IDLE_MS 內沒有再開始做事（prompt）、也沒關掉（end），
+// 而且這一輪筆記沒被更新過（Claude 沒自動記、使用者也沒改），就跳出提醒問下一步要不要記下來。
+const activity = new Map(); // projectId -> { turnAt, stopAt, suggestion, sessions: Set, timer }
+
+function pendingIdleReminder(projectId) {
+  for (const [reqId, r] of pendingReminders) if (r.kind === 'idle' && r.projectId === projectId) return reqId;
+  return null;
+}
+
+function onActivity({ event, cwd, at, sessionId, lastMessage }) {
+  const p = store.findByPath(data, cwd || '', { remote: gitRemote(cwd || '.') });
+  if (!p) return null;
+  at = Number(at) || Date.now();
+  let st = activity.get(p.id);
+  if (!st) activity.set(p.id, st = { turnAt: 0, stopAt: 0, suggestion: '', sessions: new Set(), timer: null });
+  if (sessionId) st.sessions.add(sessionId);
+  if (event === 'prompt') {
+    if (at < st.stopAt) return p; // 背景 hook 晚到：比上一次停下來還舊的開始，忽略
+    st.turnAt = at;
+    clearTimeout(st.timer); st.timer = null;
+    const old = pendingIdleReminder(p.id); // 已經回來繼續做了，閒置提醒收掉
+    if (old) finishReminder(old, 'timeout');
+  } else if (event === 'stop') {
+    if (at < st.turnAt) return p;
+    st.stopAt = at;
+    st.suggestion = store.suggestNext(lastMessage || '');
+    clearTimeout(st.timer);
+    st.timer = setTimeout(() => idleFired(p.id), IDLE_MS);
+  } else if (event === 'end') {
+    if (sessionId) st.sessions.delete(sessionId);
+    if (!st.sessions.size) { clearTimeout(st.timer); st.timer = null; }
+  }
+  return p;
+}
+
+function idleFired(projectId) {
+  const st = activity.get(projectId);
+  if (st) st.timer = null;
+  const p = data.projects.find((x) => x.id === projectId);
+  if (!st || !p || !p.remind || pendingIdleReminder(projectId)) return;
+  // 這一輪開始之後筆記已經更新過（Claude 自動記了，或使用者自己改了），就不用再問
+  const since = st.turnAt || st.stopAt;
+  if (Date.parse(p.updatedAt) >= since) return;
+  askReminder(p, 'idle', { suggestion: st.suggestion, minutes: Math.round(IDLE_MS / 60000) });
 }
 
 function finishReminder(reqId, action) {
@@ -381,6 +433,12 @@ function startServer() {
         const wantsReminder = p.remind && p.next.trim() && ['startup', 'resume', undefined].includes(body.source);
         if (!wantsReminder) return reply(200, { action: 'none', project: p });
         return reply(200, await askReminder(p));
+      }
+
+      if (req.url === '/activity') {
+        if (!['prompt', 'stop', 'end'].includes(body.event)) return reply(400, { error: 'event 不對' });
+        const p = onActivity(body);
+        return reply(200, { ok: true, project: p ? p.id : null });
       }
 
       if (req.url === '/get') {

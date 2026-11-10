@@ -27,6 +27,7 @@ const ROOT = path.join(__dirname, '..');
 const port = String(47390 + Math.floor(Math.random() * 9));
 process.env.PROJECT_NOTES_PORT = port;
 process.env.PROJECT_NOTES_TEST = '1'; // 測試時不寫剪貼簿、不搬舊資料
+process.env.PROJECT_NOTES_IDLE_MS = process.env.PROJECT_NOTES_IDLE_MS || '1500'; // 閒置提醒不用真的等 30 分鐘
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-test-'));
 const claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-claude-'));
 process.env.CLAUDE_CONFIG_DIR = claudeDir;

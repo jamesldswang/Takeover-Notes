@@ -258,4 +258,34 @@ function canon(d) {
   return JSON.stringify({ projects: n.projects, deleted: n.deleted });
 }
 
-module.exports = { normPath, homeRel, normRemote, normalize, normalizeProject, findByPath, touch, addPath, fillRemotes, update, completeNext, remove, merge, canon };
+// 從 Claude 最後一則回覆裡找「建議下一步」那一段（閒置提醒時預先填進下一步）。找不到回傳 ''。
+//   建議下一步           ← 標題（含「下一步」的短行，可以是 ## 標題或「下一步：xxx」）
+//                        ← 中間的空行跳過
+//   1. 實際錄一段…        ← 收集到空行後面接的不是清單項目、或遇到下一個標題為止
+const LIST_ITEM = /^\s*(?:[-*•]\s+|\d+[.)、]\s*|[①-⑳])/;
+function suggestNext(text) {
+  const lines = String(text || '').replace(/\r/g, '').split('\n');
+  const isHeading = (l) => /下一步|next steps?/i.test(l) && !LIST_ITEM.test(l)
+    && (/^\s*#/.test(l) || /^\s*\**[^。，,.]{0,20}(下一步|next steps?)[^。]{0,6}[：:]?\**\s*$/i.test(l) || /(下一步|next steps?)\**\s*[：:]/i.test(l));
+  let h = -1;
+  for (let i = lines.length - 1; i >= 0; i--) if (isHeading(lines[i])) { h = i; break; }
+  if (h < 0) return '';
+  const strip = (l) => l.replace(/\*\*/g, '').trimEnd();
+  const out = [];
+  const inline = strip(lines[h]).replace(/^.*?(下一步|next steps?)\s*[：:]\s*/i, '');
+  if (inline !== strip(lines[h]) && inline.trim()) out.push(inline.trim());
+  for (let i = h + 1; i < lines.length; i++) {
+    const l = lines[i];
+    if (/^\s*#/.test(l) || /^\s*(---|___|\*\*\*)\s*$/.test(l)) break;
+    if (!l.trim()) {
+      if (!out.length) continue;
+      const nextLine = lines.slice(i + 1).find((x) => x.trim());
+      if (nextLine && LIST_ITEM.test(nextLine)) continue; // 清單項目之間的空行
+      break;
+    }
+    out.push(strip(l));
+  }
+  return out.join('\n').trim().slice(0, 2000);
+}
+
+module.exports = { normPath, homeRel, normRemote, normalize, normalizeProject, findByPath, touch, addPath, fillRemotes, update, completeNext, remove, merge, canon, suggestNext };
