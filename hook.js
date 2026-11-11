@@ -20,7 +20,8 @@ function readStdin() {
   });
 }
 
-function buildOutput(action, p) {
+// launched：這個 Claude Code 是從接管筆記 App 開的；「立刻執行」時第一則訊息已經由 App 自動帶入
+function buildOutput(action, p, launched) {
   if (!p) return null;
   const notes = [
     `【接管筆記】專案「${p.name}」（${p.path}）`,
@@ -35,7 +36,12 @@ function buildOutput(action, p) {
     '- 只是回答問題、沒有改變進度時不用更新。更新後在回覆最後用一句話告訴使用者「已更新接管筆記」。',
   ].join('\n');
   let context, systemMessage;
-  if (action === 'run') {
+  if (action === 'run' && launched) {
+    context = [...notes, '',
+      '使用者在接管筆記 App 按了「立刻執行」，App 開啟 Claude Code 時自動送出第一則訊息「開始執行接管筆記上的下一步」。收到後請直接開始執行上面的「下一步」，不用再確認。',
+      howToUpdate].join('\n');
+    systemMessage = `📝 接管筆記：自動開始執行「${p.next.trim()}」`;
+  } else if (action === 'run') {
     context = [...notes, '',
       '使用者剛剛在接管筆記 App 按了「立刻執行」。使用者傳來第一則訊息時（就算只是「開始」「好」或貼上的指令），請直接開始執行上面的「下一步」。',
       howToUpdate].join('\n');
@@ -97,7 +103,7 @@ async function reportActivity(input, cwd, at) {
     if (ACTIVITY[input.hook_event_name]) return await reportActivity(input, cwd, at);
     if (!(await ensureApp())) return;
     const res = await request('POST', '/session-start', { cwd, source: input.source }, 115 * 1000);
-    const out = buildOutput(res.action, res.project);
+    const out = buildOutput(res.action, res.project, res.launched);
     if (out) process.stdout.write(JSON.stringify(out));
   } catch { /* 安靜失敗 */ }
 })().finally(() => setTimeout(() => process.exit(0), 50));

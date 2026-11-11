@@ -301,15 +301,27 @@ function claudeExe() {
 }
 
 const launches = []; // 測試用：記下要開的資料夾，不真的開
+// 從 App 開 Claude Code 時，先在 App 裡問「立刻執行／稍後」，答案記在這裡；
+// 接著 Claude Code 的 SessionStart hook 送 /session-start 來時直接用這個答案，不再問第二次。
+const preAnswered = new Map(); // projectId -> { action: 'run' | 'later', at }
+const PRE_ANSWER_MS = 2 * 60 * 1000;
+// 「立刻執行」時當作 Claude Code 的第一則訊息自動送出（真正的下一步內容由 hook 的 additionalContext 帶給 Claude）。
+// 會經過 cmd 的命令列，所以只能用固定文字，不能放使用者打的內容（引號、%、換行都會壞）。
+const START_PROMPT = '開始執行接管筆記上的下一步';
+
 // 用 cmd 的 start 開一個新的主控台視窗，在專案資料夾執行 claude（--continue = 接續上次的對話）
-function launchClaude(p, cont) {
+async function launchClaude(p, cont) {
   const dir = localPath(p);
   if (!dir) return { ok: false, error: `這台電腦找不到「${p.name}」的資料夾（記錄的路徑：${p.path}）。把這台電腦上的資料夾路徑貼到搜尋框，按 Enter 就會接上。` };
-  touch(dir);
+  let action = 'none';
+  if (p.remind && p.next.trim()) action = (await askReminder(p, 'open', { launch: true })).action;
+  const opened = touch(dir);
   changed();
-  if (process.env.PROJECT_NOTES_TEST) { launches.push({ path: dir, cont: !!cont }); return { ok: true }; }
+  const run = action === 'run';
+  if (action !== 'none') preAnswered.set(opened.id, { action: run ? 'run' : 'later', at: Date.now() });
+  if (process.env.PROJECT_NOTES_TEST) { launches.push({ path: dir, cont: !!cont, prompt: run ? START_PROMPT : '' }); return { ok: true, action }; }
   const title = ('Claude Code - ' + p.name).replace(/["^&|<>%]/g, '');
-  const cmd = `/d /c start "${title}" /D "${dir}" "${claudeExe()}"${cont ? ' --continue' : ''}`;
+  const cmd = `/d /c start "${title}" /D "${dir}" "${claudeExe()}"${cont ? ' --continue' : ''}${run ? ` "${START_PROMPT}"` : ''}`;
   spawn('cmd.exe', [cmd], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true, windowsHide: true }).unref();
   win.hide();
   return { ok: true };
@@ -430,7 +442,14 @@ function startServer() {
         if (!body.cwd) return reply(400, { error: 'cwd 必填' });
         const p = touch(body.cwd);
         changed();
-        const wantsReminder = p.remind && p.next.trim() && ['startup', 'resume', undefined].includes(body.source);
+        const isOpen = ['startup', 'resume', undefined].includes(body.source);
+        // 剛從 App 開的：App 已經問過了，直接用那個答案
+        const pre = isOpen && preAnswered.get(p.id);
+        if (pre) {
+          preAnswered.delete(p.id);
+          if (Date.now() - pre.at < PRE_ANSWER_MS) return reply(200, { action: pre.action, project: p, launched: true });
+        }
+        const wantsReminder = p.remind && p.next.trim() && isOpen;
         if (!wantsReminder) return reply(200, { action: 'none', project: p });
         return reply(200, await askReminder(p));
       }

@@ -39,14 +39,14 @@ description: 修改、測試、打包、發布「接管筆記」桌面 App（Tak
    ```bash
    powershell -NoProfile -Command "Get-Process | Where-Object { \$_.Path -like '*接管筆記.exe' -or \$_.Path -like '*Takeover-Notes*electron.exe' } | Stop-Process -Force"
    ```
-3. **測試**（見下一節），四個都要跑。
+3. **測試**（見下一節），全部都要跑。
 4. **更新 `README.md`**：在功能表格和「版本紀錄」裡補上這次的變更。如果原本的「已知限制」解決了，就把那一條刪掉。
 5. **打包**：`npm run dist`
 6. **重新啟動 App**：使用者平常用的是打包版。
    ```bash
-   powershell -NoProfile -Command "Start-Process 'D:\AI tool\TakeoverNotes-1.1.1-win-x64\TakeoverNotes-1.1.1-win-x64\接管筆記.exe'"
+   powershell -NoProfile -Command "Start-Process 'D:\AI tool\TakeoverNotes-1.2.0-win-x64\TakeoverNotes-1.2.0-win-x64\接管筆記.exe'"
    ```
-   路徑裡的 `1.1.1` 要換成現在的版號（新版號要先把 dist 的 zip 解壓縮到 `D:\AI tool`）。換了版號，exe 路徑就變了：settings.json 裡的 hook 會指向舊路徑，App 會顯示「連接的是別的位置」，請使用者按「重新連接」（或在系統匣勾選）。
+   路徑裡的 `1.2.0` 要換成現在的版號（新版號要先把 dist 的 zip 解壓縮到 `D:\AI tool`）。換了版號，exe 路徑就變了：settings.json 裡的 hook 會指向舊路徑，App 會顯示「連接的是別的位置」，請使用者按「重新連接」（或在系統匣勾選）。
 7. **使用者要發布時**：`git` commit、push，再 `bash tools/release.sh`（要先打包；README 版本紀錄要有 `### <版號>` 段落）。同一個版號只能建立一次 Release。
 
 版號在 `package.json` 的 `version`。使用者沒說要改就不要動；改了之後，視窗左上角、系統匣選單和 zip 檔名都會自動跟著變。
@@ -59,6 +59,7 @@ node tools/store-test.js                                                        
 ./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/example-test.js     # 開啟 → 記錄 → 提醒 → 立刻執行 → 完成
 ./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/launcher-test.js    # 快速切換
 ./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/portable-test.js    # 連接 Claude Code、同步資料夾、兩台同時改
+./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/launch-run-test.js  # 從 App 開 Claude Code：先問、立刻執行自動帶第一則訊息、hook 不再問
 ./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/idle-test.js        # 自動更新指示、閒置提醒（run-in-app 把 30 分鐘縮成 1.5 秒）、四個 hook 事件
 ```
 
@@ -115,7 +116,7 @@ X=<解壓縮的資料夾>
 - **視窗失焦會自動隱藏。** 跳出提醒時 `main.js` 會設 `pinned = true`，所有提醒都回答完才解除；開系統對話框（選資料夾、匯出、匯入）要包在 `withPinned()` 裡。頁面要自己跳出東西時，先 `window.__notesApp.pin()`，結束後 `unpin()`。**不要用 `confirm()`／`alert()`**，用頁面裡的 `.modal`。
 - **hook 絕對不能弄壞 Claude Code。** `hook.js` 任何錯誤都要吞掉、exit 0、stdout 只能輸出合法 JSON（或什麼都不輸出）。不要在 hook 裡 `console.log` 除錯訊息。
 - **hook 會卡住 Claude Code 的啟動，直到使用者回答提醒。** 時間限制有三層，要一起看：`main.js` 的 `REMINDER_TIMEOUT_MS`（90 秒，逾時當成「稍後」）< `hook.js` 的 HTTP timeout（115 秒）< `claude-setup.js` 的 `HOOK_TIMEOUT`（120 秒）。改其中一個要維持這個大小順序。
-- **「立刻執行」沒辦法替使用者送出訊息。** SessionStart hook 只能給 `additionalContext` 和 `systemMessage`，Claude 要等使用者第一則訊息才會動。所以 `additionalContext` 裡告訴 Claude「第一則訊息就算只是『開始』也要執行下一步」，並把指令複製到剪貼簿。
+- **「立刻執行」沒辦法替使用者送出訊息。** SessionStart hook 只能給 `additionalContext` 和 `systemMessage`，Claude 要等使用者第一則訊息才會動。所以 `additionalContext` 裡告訴 Claude「第一則訊息就算只是『開始』也要執行下一步」，並把指令複製到剪貼簿。**從 App 開 Claude Code 時繞過這個限制**：`launchClaude()` 先 `askReminder(p, 'open', { launch: true })`（頁面用 `REMINDER_TEXT.launch`），按「立刻執行」就在 claude 命令列後面加 `START_PROMPT`（固定文字，因為要經過 cmd，不能放使用者打的內容），並把答案記在 `preAnswered`；2 分鐘內同專案的 `/session-start` 直接回 `{ action, launched: true }` 不再問，`hook.js` 的 `buildOutput()` 依 `launched` 換說法。測試：`tools/launch-run-test.js`。
 - **本機 HTTP 的安全規則。** 只 listen `127.0.0.1`，帶 `Origin` header 的請求（瀏覽器發的）一律 403。新增 API 時維持這兩點。`open-folder` 只開清單裡已有專案的路徑，不接受頁面傳來的任意路徑。
 - **開啟 Claude Code 用 `cmd /c start "標題" /D "資料夾" "claude.exe" [--continue]`**，spawn 時要 `windowsVerbatimArguments: true`，引號才不會被 Node 再包一層。不能直接 `spawn(claude.exe, { detached: true, stdio: 'ignore' })`：claude 需要真的主控台當輸入輸出，`ignore` 會給它 NUL。標題要拿掉 `" ^ & | < > %`。這台電腦**沒有 Windows Terminal（wt.exe）和 pwsh**，不要改用它們。`claude.exe` 在 `%USERPROFILE%\.local\bin`（`claudeExe()`），找不到用 PATH。開啟的資料夾是 `localPath(p)`（這台電腦上存在的路徑），開啟時會 `touch()` 更新 `lastOpenedAt`。
 - **兩種模式由 `main.js` 決定視窗大小。** 頁面要切換用 `setMode(m, true)`（會叫 `api.setMode` 改大小）；`main.js` 送來的 `mode` 事件用 `setMode(m, false)` 只切畫面。快捷鍵、系統匣左鍵、second-instance 一律開快速切換；提醒和設定一律切完整筆記。

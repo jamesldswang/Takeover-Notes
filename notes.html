@@ -834,6 +834,9 @@
     const REMINDER_TEXT = {
         open: { label: '下一步（可以先修改再執行）', later: '稍後再說', ok: '▶ 立刻執行',
             hint: '按「立刻執行」後，Claude 會收到這個下一步；在 Claude Code 隨便輸入一句（例如「開始」）就會動工。指令也已複製到剪貼簿。' },
+        // 從 App 開 Claude Code（快速切換 Enter、▶ Claude Code、↻ 接續上次對話）時，開啟前先問
+        launch: { label: '下一步（可以先修改再執行）', later: '只開啟，稍後再說', ok: '▶ 立刻執行',
+            hint: '按「立刻執行」會開啟 Claude Code 並自動開始做這個下一步，不用再輸入。' },
         idle: { label: '下一步要記在接管筆記嗎？（可以先修改）', later: '不用', ok: '📝 記下來',
             hint: '已經先填好 Claude 最後建議的下一步。按「記下來」會存成這個專案的下一步，下次打開專案時會提醒你。' },
     };
@@ -846,9 +849,9 @@
         if (mode !== 'full') setMode('full', false);
         selectedId = p.id; renderList(); renderDetail(true);
         document.getElementById('reminderCount').textContent = reminders.length > 1 ? `還有 ${reminders.length - 1} 個專案在等` : '';
-        const idle = r.kind === 'idle', t = REMINDER_TEXT[idle ? 'idle' : 'open'];
+        const idle = r.kind === 'idle', t = REMINDER_TEXT[idle ? 'idle' : r.launch ? 'launch' : 'open'];
         document.getElementById('reminderTitle').textContent = idle
-            ? `⏰「${p.name}」已經 ${r.minutes || 30} 分鐘沒動了` : `👋 你打開了「${p.name}」`;
+            ? `⏰「${p.name}」已經 ${r.minutes || 30} 分鐘沒動了` : r.launch ? `👋 要開啟「${p.name}」` : `👋 你打開了「${p.name}」`;
         document.getElementById('reminderPath').textContent = shownPath(p);
         document.getElementById('reminderProgress').textContent = p.progress.trim() || '（還沒有記錄進度）';
         document.getElementById('reminderNext').value = idle ? ((r.suggestion || '').trim() || p.next) : p.next;
