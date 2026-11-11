@@ -193,6 +193,7 @@
         .launcher-path { font-size: 11px; color: #636366; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .launcher-actions { display: none; gap: 6px; flex-shrink: 0; }
         .launcher-item.active .launcher-actions { display: flex; }
+        .launcher-delete:hover { color: #ff453a; }
         .launcher-footer {
             display: flex; gap: 14px; padding: 8px 16px; font-size: 11px; color: #8e8e93; user-select: none;
             border-top: 1px solid rgba(255, 255, 255, 0.06); flex-wrap: wrap;
@@ -249,6 +250,7 @@
             <span><kbd>Enter</kbd> 開啟 Claude Code</span>
             <span><kbd>Shift</kbd>+<kbd>Enter</kbd> 接續上次對話</span>
             <span><kbd>Tab</kbd> 看筆記</span>
+            <span><kbd>Del</kbd> 刪除</span>
             <span><kbd>Esc</kbd> 關閉</span>
         </div>
     </div>
@@ -322,7 +324,7 @@
             <div class="modal-sub">只會刪除筆記，不會動到專案資料夾裡的檔案。</div>
             <div class="modal-buttons">
                 <button class="btn btn-secondary" onclick="closeModal('confirmModal')">取消</button>
-                <button class="btn btn-primary" style="background:#ff453a;color:#fff" onclick="confirmDelete()">刪除</button>
+                <button class="btn btn-primary" id="confirmDeleteBtn" style="background:#ff453a;color:#fff" onclick="confirmDelete()">刪除</button>
             </div>
         </div>
     </div>
@@ -555,7 +557,14 @@
 
     // ---------- 新增 / 刪除 ----------
     function openModal(id) { document.getElementById(id).classList.add('show'); }
-    function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+    function closeModal(id) {
+        const el = document.getElementById(id);
+        if (!el.classList.contains('show')) return;
+        el.classList.remove('show');
+        if (id === 'confirmModal') pendingDeleteId = null;
+        // 快速切換裡關掉對話框後，游標回到搜尋框，才能繼續用鍵盤操作
+        if (mode === 'launcher' && !document.querySelector('.modal.show')) document.getElementById('launcherInput').focus();
+    }
 
     function openAddModal() {
         document.getElementById('addPath').value = '';
@@ -581,15 +590,19 @@
         pendingDeleteId = id;
         document.getElementById('confirmText').textContent = `刪除「${p.name}」的筆記？`;
         openModal('confirmModal');
+        // 焦點放在「刪除」：Enter 確定、Esc 取消（也避免快速切換的 Enter 去開 Claude Code）
+        document.getElementById('confirmDeleteBtn').focus();
     }
 
     function confirmDelete() {
-        if (pendingDeleteId) {
-            if (editId === pendingDeleteId) { edits = {}; editId = null; }
-            api.remove(pendingDeleteId);
-            if (selectedId === pendingDeleteId) selectedId = null;
+        const id = pendingDeleteId;
+        if (id) {
+            if (editId === id) { edits = {}; editId = null; }
+            api.remove(id);
+            if (selectedId === id) selectedId = null;
+            projects = projects.filter(x => x.id !== id);
+            if (mode === 'launcher') renderLauncher();
         }
-        pendingDeleteId = null;
         closeModal('confirmModal');
     }
 
@@ -615,6 +628,7 @@
         if (tellMain) api.setMode(m);
         if (m === 'launcher') {
             closeModal('settingsModal');
+            closeModal('confirmModal');
             renderHookBanner();
             const input = document.getElementById('launcherInput');
             input.value = '';
@@ -674,6 +688,7 @@
                     </div>
                     <div class="launcher-actions">
                         <button class="icon-btn" title="看筆記（Tab）" onclick="event.stopPropagation(); openNotes(${i})">✎ 筆記</button>
+                        <button class="icon-btn launcher-delete" title="刪除這個專案的筆記（Del）" onclick="event.stopPropagation(); askDelete('${p.id}')">🗑</button>
                     </div>
                 </div>`;
         }).join('');
@@ -697,6 +712,14 @@
         } else if (e.key === 'Tab') {
             e.preventDefault();
             openNotes(launcherIndex);
+        } else if (e.key === 'Delete') {
+            // 游標在搜尋框最後面（Delete 本來就刪不到字）時，才當成刪除專案
+            const input = e.target && e.target.value !== undefined ? e.target : document.getElementById('launcherInput');
+            if (input.selectionStart !== input.selectionEnd || input.selectionEnd < input.value.length) return;
+            const it = launcherItems()[launcherIndex];
+            if (!it || it.type !== 'project') return;
+            e.preventDefault();
+            askDelete(it.p.id);
         } else if (e.key === 'Escape') {
             e.preventDefault();
             e.stopPropagation();

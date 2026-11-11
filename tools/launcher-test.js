@@ -64,5 +64,41 @@ module.exports = async ({ page, win }) => {
   await page(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`);
   await wait(300);
   out.backToLauncher = await page(`mode`);
+
+  // ---- 刪除 ----
+  const launchesBefore = launches.length;
+  // Del：游標不在搜尋框最後面時只刪字，不跳確認
+  await type('alp');
+  await page(`const el = document.getElementById('launcherInput'); el.focus(); el.setSelectionRange(0, 0)`);
+  await key('Delete');
+  out.delMidTextNoConfirm = !(await page(`document.getElementById('confirmModal').classList.contains('show')`));
+  // 游標在最後面 → 跳確認；Esc 取消，專案還在，焦點回到搜尋框
+  await page(`document.getElementById('launcherInput').setSelectionRange(3, 3)`);
+  await key('Delete');
+  out.delConfirmShown = await page(`document.getElementById('confirmModal').classList.contains('show')`);
+  out.delConfirmVisible = await page(`document.getElementById('confirmModal').getBoundingClientRect().width > 0`);
+  out.delConfirmText = await page(`document.getElementById('confirmText').textContent`);
+  out.delFocusOnButton = await page(`document.activeElement.id`);
+  await page(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await wait(100);
+  out.delCancelKeeps = await page(`!document.getElementById('confirmModal').classList.contains('show') && projects.some(p => p.name === 'Alpha')`);
+  out.delFocusBack = await page(`document.activeElement.id`);
+  // 再按 Del → 按「刪除」：從清單和資料裡消失
+  await key('Delete');
+  await page(`document.getElementById('confirmDeleteBtn').click()`);
+  await wait(300);
+  out.delRemovedFromList = await page(`!launcherItems().some(it => it.type === 'project' && it.p.name === 'Alpha')`);
+  out.delRemovedFromData = await page(`!api.list().some(p => p.name === 'Alpha')`);
+  out.delModeStill = await page(`mode`);
+  // 🗑 按鈕也能刪
+  await type('');
+  out.trashButtons = await page(`document.querySelectorAll('.launcher-item.active .launcher-delete').length`);
+  const before = await page(`api.list().length`);
+  await page(`document.querySelector('.launcher-item.active .launcher-delete').click()`);
+  out.trashConfirmShown = await page(`document.getElementById('confirmModal').classList.contains('show')`);
+  await page(`confirmDelete()`);
+  await wait(300);
+  out.trashDeleted = (await page(`api.list().length`)) === before - 1;
+  out.deleteDidNotLaunch = launches.length === launchesBefore;
   return out;
 };

@@ -1,6 +1,6 @@
 # 📝 接管筆記 Takeover Notes
 
-**版本：1.1.0**　｜　[下載最新版](https://github.com/jamesldswang/Takeover-Notes/releases/latest)
+**版本：1.1.1**　｜　[下載最新版](https://github.com/jamesldswang/Takeover-Notes/releases/latest)
 
 記錄每一個在 Claude Code 開發的專案：**① 現在的進度**、**② 下一步**。程式常駐在系統匣，按 **Ctrl+Alt+N** 叫出快速切換，選專案就直接開啟 Claude Code。
 
@@ -12,7 +12,7 @@
 
 > 系統需求：Windows 10／11 64 位元，已安裝 [Claude Code](https://claude.com/claude-code)。**不需要安裝 Node.js。**
 
-1. 到 [Releases](https://github.com/jamesldswang/Takeover-Notes/releases/latest) 下載 `TakeoverNotes-1.1.0-win-x64.zip`，按右鍵選「解壓縮全部」，放到固定的位置（例如 `C:\Tools\TakeoverNotes`）。
+1. 到 [Releases](https://github.com/jamesldswang/Takeover-Notes/releases/latest) 下載 `TakeoverNotes-1.1.1-win-x64.zip`，按右鍵選「解壓縮全部」，放到固定的位置（例如 `C:\Tools\TakeoverNotes`）。
 2. 打開資料夾，雙擊 **`接管筆記.exe`**。畫面上不會跳出視窗，請看右下角系統匣有沒有出現黃色便條紙圖示。
 3. 按 **Ctrl+Alt+N**，上方會出現黃色提示「還沒連接 Claude Code」，按 **連接**。
    這會在 Claude Code 的設定（`%USERPROFILE%\.claude\settings.json`）加上接管筆記的 hook（SessionStart：開啟時提醒；UserPromptSubmit／Stop／SessionEnd：在背景告訴 App 專案有沒有在動，給閒置提醒用），原本的設定都會保留，改之前也會備份成 `settings.json.takeover-notes.bak`。
@@ -50,10 +50,11 @@
 
 | 區塊 | 說明 |
 |------|------|
-| ⚡ 快速切換（Ctrl+Alt+N 一叫出來就是這個） | 小視窗、搜尋框已經在等你打字：輸入專案名稱過濾，**↑↓** 選擇，**Enter** 在那個資料夾開一個新的 Claude Code 視窗，**Shift+Enter** 開啟並接續上次的對話（`claude --continue`），**Tab** 看這個專案的完整筆記，**Esc** 關閉。每個專案顯示下一步（黃色）和上次開啟時間。直接**貼上資料夾路徑**按 Enter，會把它加成新專案（或接上已有的專案）並開啟 Claude Code |
+| ⚡ 快速切換（Ctrl+Alt+N 一叫出來就是這個） | 小視窗、搜尋框已經在等你打字：輸入專案名稱過濾，**↑↓** 選擇，**Enter** 在那個資料夾開一個新的 Claude Code 視窗，**Shift+Enter** 開啟並接續上次的對話（`claude --continue`），**Tab** 看這個專案的完整筆記，**Del** 或選中那一列的 🗑 刪除專案（會先確認），**Esc** 關閉。每個專案顯示下一步（黃色）和上次開啟時間。直接**貼上資料夾路徑**按 Enter，會把它加成新專案（或接上已有的專案）並開啟 Claude Code |
 | 專案清單（完整筆記左側） | 所有專案，最近開啟的排最前面。上方可以搜尋（名稱、路徑、進度、下一步都搜得到）。關閉提醒的專案會顯示 🔕 |
 | 自動加入 | 在 Claude Code 打開任何資料夾，就會自動加進清單（使用者資料夾本身除外）。在專案的子資料夾開啟也算同一個專案 |
 | 手動新增 | 完整筆記右上角「＋ 新增專案」，輸入資料夾路徑和名稱 |
+| 刪除專案 | 快速切換選中專案按 **Del**（或按那一列的 🗑），也可以在完整筆記右下角按「刪除專案」。會先跳出確認，Enter 刪除、Esc 取消。只刪筆記，不會動到專案資料夾；用同步資料夾的話，另一台電腦也會一起刪掉 |
 | 專案內容（完整筆記右側） | 名稱（可以直接改）、路徑（📂 用檔案總管打開、▶ Claude Code、↻ 接續上次對話）、① 現在的進度、② 下一步、完成紀錄。打字會自動儲存 |
 | ✓ 這一步完成了 | 把目前的「下一步」移到完成紀錄（記下日期），清空讓你寫新的下一步 |
 | 開啟提醒 | 在 Claude Code 開啟（或 resume）專案、而且有「下一步」時，視窗跳出：顯示進度和下一步（下一步可以先修改），按 **▶ 立刻執行** 或 **稍後再說**。90 秒沒回應就當成稍後。每個專案可以取消勾選「在 Claude Code 開啟這個專案時提醒我下一步」 |
@@ -160,6 +161,10 @@ Takeover-Notes/
 ---
 
 ## 版本紀錄
+
+### 1.1.1（2026-11-11）
+
+- **快速切換可以刪除專案**：選中專案按 **Del**，或按那一列的 🗑。搜尋框游標不在最後面時，Del 照常刪字。確認視窗預設停在「刪除」，Enter 確定、Esc 取消。
 
 ### 1.1.0（2026-11-10）
 

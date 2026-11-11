@@ -1,13 +1,13 @@
 ---
 name: takeover-notes
-description: 修改、測試、打包、發布「接管筆記」桌面 App（Takeover Notes，原始碼在 C:\Users\user\ProjectNotes，GitHub jamesldswang/Takeover-Notes；Electron，記錄每個 Claude Code 專案的現在進度和下一步，Ctrl+Alt+N 叫出快速切換並開啟 Claude Code，Claude Code 開啟專案時透過 SessionStart hook 跳出提醒，可用同步資料夾或匯出匯入在多台電腦接續工作）。只要使用者要改接管筆記（以前叫「專案筆記」）的功能或畫面、修 bug、改提醒、hook、同步或換電腦的行為、重新打包 zip、發布 Release、更新版號或 README，就先載入這個 skill。
+description: 修改、測試、打包、發布「接管筆記」桌面 App（Takeover Notes，原始碼在 D:\Personal_Git\Takeover-Notes，GitHub jamesldswang/Takeover-Notes；Electron，記錄每個 Claude Code 專案的現在進度和下一步，Ctrl+Alt+N 叫出快速切換並開啟 Claude Code，Claude Code 開啟專案時透過 SessionStart hook 跳出提醒，可用同步資料夾或匯出匯入在多台電腦接續工作）。只要使用者要改接管筆記（以前叫「專案筆記」）的功能或畫面、修 bug、改提醒、hook、同步或換電腦的行為、重新打包 zip、發布 Release、更新版號或 README，就先載入這個 skill。
 ---
 
 # 接管筆記 App
 
 這是一個 Electron 桌面 App（1.0.0 之前叫「專案筆記」）。它把一個單頁的 `notes.html` 包成常駐在系統匣的視窗，按 **Ctrl+Alt+N** 叫出快速切換。在 Claude Code 開啟專案時，SessionStart hook（`hook.js`）會通知 App，App 跳出提醒問使用者要不要立刻執行下一步。資料可以放在同步資料夾，讓多台電腦接續工作。使用者用繁體中文溝通，回覆、程式註解、UI 文字也都用繁體中文。
 
-原始碼資料夾是 `C:\Users\user\ProjectNotes`（沒有改名，資料夾名稱和 App 名稱不同），GitHub 是 `https://github.com/jamesldswang/Takeover-Notes`，分支 `main`。
+原始碼資料夾是 `D:\Personal_Git\Takeover-Notes`（`C:\Users\user\ProjectNotes` 是停在 1.0.1 的舊副本，不要改那裡）。使用者平常用的打包版解壓縮在 `D:\AI tool\TakeoverNotes-<版號>-win-x64\TakeoverNotes-<版號>-win-x64\`，GitHub 是 `https://github.com/jamesldswang/Takeover-Notes`，分支 `main`。
 
 ## 檔案
 
@@ -37,16 +37,16 @@ description: 修改、測試、打包、發布「接管筆記」桌面 App（Tak
 1. **改程式**：畫面和互動改 `notes.html`；資料規則和合併改 `store.js`；視窗、快捷鍵、系統匣、HTTP、提醒、同步改 `main.js`；Claude 收到的內容改 `hook.js` 的 `buildOutput()`；寫 settings.json 的方式改 `claude-setup.js`。新增要打包的檔案，要加進 `build.js` 的檔案清單。
 2. **先關掉正在跑的 App**：App 有單一實例鎖，沒關掉的話，測試和打包都會出問題。
    ```bash
-   powershell -NoProfile -Command "Get-Process | Where-Object { \$_.Path -like 'C:\Users\user\ProjectNotes\*' } | Stop-Process -Force"
+   powershell -NoProfile -Command "Get-Process | Where-Object { \$_.Path -like '*接管筆記.exe' -or \$_.Path -like '*Takeover-Notes*electron.exe' } | Stop-Process -Force"
    ```
 3. **測試**（見下一節），四個都要跑。
 4. **更新 `README.md`**：在功能表格和「版本紀錄」裡補上這次的變更。如果原本的「已知限制」解決了，就把那一條刪掉。
 5. **打包**：`npm run dist`
 6. **重新啟動 App**：使用者平常用的是打包版。
    ```bash
-   powershell -NoProfile -Command "Start-Process 'C:\Users\user\ProjectNotes\dist\TakeoverNotes-1.0.0-win-x64\接管筆記.exe'"
+   powershell -NoProfile -Command "Start-Process 'D:\AI tool\TakeoverNotes-1.1.1-win-x64\TakeoverNotes-1.1.1-win-x64\接管筆記.exe'"
    ```
-   路徑裡的 `1.0.0` 要換成現在的版號。換了版號，exe 路徑就變了：settings.json 裡的 hook 會指向舊路徑，App 會顯示「連接的是別的位置」，請使用者按「重新連接」（或在系統匣勾選）。
+   路徑裡的 `1.1.1` 要換成現在的版號（新版號要先把 dist 的 zip 解壓縮到 `D:\AI tool`）。換了版號，exe 路徑就變了：settings.json 裡的 hook 會指向舊路徑，App 會顯示「連接的是別的位置」，請使用者按「重新連接」（或在系統匣勾選）。
 7. **使用者要發布時**：`git` commit、push，再 `bash tools/release.sh`（要先打包；README 版本紀錄要有 `### <版號>` 段落）。同一個版號只能建立一次 Release。
 
 版號在 `package.json` 的 `version`。使用者沒說要改就不要動；改了之後，視窗左上角、系統匣選單和 zip 檔名都會自動跟著變。
@@ -54,7 +54,7 @@ description: 修改、測試、打包、發布「接管筆記」桌面 App（Tak
 ## 測試
 
 ```bash
-cd /c/Users/user/ProjectNotes
+cd /d/Personal_Git/Takeover-Notes
 node tools/store-test.js                                                             # 純邏輯：合併、換電腦認專案
 ./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/example-test.js     # 開啟 → 記錄 → 提醒 → 立刻執行 → 完成
 ./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/launcher-test.js    # 快速切換
