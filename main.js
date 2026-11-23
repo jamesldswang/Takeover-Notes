@@ -169,9 +169,48 @@ function gitRemote(dir) {
 
 const touch = (cwd, opts = {}) => store.touch(data, cwd, { ...opts, remote: gitRemote(cwd) });
 
-// 舊專案補上 git remote，並把另一台電腦重複新增的同一個專案併起來；有改變就存檔
+// 1. 資料夾改名／搬家：找不到資料夾的專案，到其他專案資料夾的上一層（例如 D:\Personal_Git）
+//    找 git remote 相同的資料夾接上（只看一層，不往下找）。
+// 2. 補上這台電腦查得到的 git remote（舊專案、GitHub 改名後改了網址），並把重複的專案併起來。
+// 有改變就存檔。
+let lastRelocate = 0;
 function fillRemotes() {
-  if (store.fillRemotes(data, (p) => { const d = localPath(p); return d ? gitRemote(d) : ''; })) changed();
+  lastRelocate = Date.now();
+  let dirty = false;
+  if (data.projects.some((p) => p.remotes.length && !localPath(p))) {
+    if (store.relocate(data, (p) => !!localPath(p), repoCandidates())) dirty = true;
+  }
+  if (store.fillRemotes(data, (p) => { const d = localPath(p); return d ? gitRemote(d) : ''; })) dirty = true;
+  if (dirty) changed();
+}
+
+// 叫出視窗時也檢查一次（使用者可能剛改了資料夾名稱），最多 10 秒一次
+function maybeRelocate() {
+  if (Date.now() - lastRelocate > 10000) fillRemotes();
+}
+
+// 記錄過的路徑的上一層資料夾裡，所有有自己 .git 的子資料夾：[{ dir, remote }]
+function repoCandidates() {
+  const parents = new Map();
+  for (const p of data.projects) {
+    for (const x of p.paths) {
+      const parent = path.dirname(path.resolve(x));
+      if (parent !== path.resolve(x)) parents.set(store.normPath(parent), parent);
+    }
+  }
+  const out = [];
+  for (const parent of parents.values()) {
+    let entries;
+    try { entries = fs.readdirSync(parent, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries.slice(0, 500)) {
+      if (!e.isDirectory()) continue;
+      const dir = path.join(parent, e.name);
+      if (!fs.existsSync(path.join(dir, '.git'))) continue;
+      const remote = gitRemote(dir);
+      if (remote) out.push({ dir, remote });
+    }
+  }
+  return out;
 }
 
 // ---------- Claude Code 整合 ----------
@@ -284,6 +323,7 @@ function createWindow() {
 function showWin(newMode) {
   if (!win) return;
   if (newMode) mode = newMode;
+  maybeRelocate();
   const [w, h] = SIZES[mode];
   const { x, y, width, height } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
   win.setBounds({ x: Math.round(x + (width - w) / 2), y: Math.round(y + (height - h) / 2), width: w, height: h });
@@ -618,7 +658,7 @@ app.whenReady().then(() => {
   });
 });
 
-module.exports = { launches, setDataDir, pollDataFile, getData: () => data }; // 給測試用
+module.exports = { launches, setDataDir, pollDataFile, fillRemotes, getData: () => data }; // 給測試用
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();

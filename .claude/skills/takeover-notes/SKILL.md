@@ -60,6 +60,7 @@ node tools/store-test.js                                                        
 ./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/launcher-test.js    # 快速切換
 ./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/portable-test.js    # 連接 Claude Code、同步資料夾、兩台同時改
 ./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/launch-run-test.js  # 從 App 開 Claude Code：先問、立刻執行自動帶第一則訊息、hook 不再問
+./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/relocate-test.js    # 資料夾改名自動接上、GitHub 改名記新 remote
 ./node_modules/electron/dist/electron.exe tools/run-in-app.js tools/idle-test.js        # 自動更新指示、閒置提醒（run-in-app 把 30 分鐘縮成 1.5 秒）、四個 hook 事件
 ```
 
@@ -139,7 +140,8 @@ X=<解壓縮的資料夾>
     path,                  // 最近一次使用的路徑
     paths: [],             // 各台電腦用過的所有路徑
     homePaths: [],         // 相對於該台電腦家目錄的路徑（換電腦時認專案用）
-    remote: '',            // git origin，正規化成 github.com/owner/repo（換電腦時認專案用）
+    remotes: [],           // 用過的所有 git origin，正規化成 github.com/owner/repo（換電腦時認專案用；GitHub 改名後新舊都在）
+    remote: '',            // = remotes[0]，只給不認得 remotes 的舊版 App 用，比對一律用 remotes
     progress: '',          // ① 現在的進度
     next: '',              // ② 下一步；有內容才會在開啟時提醒
     remind: true,          // 開啟專案時要不要提醒
@@ -149,7 +151,8 @@ X=<解壓縮的資料夾>
   ```
   - **認專案**（`findByPath()`）：① 路徑相同或 cwd 在它底下（取最深的）② git remote 相同 ③ 家目錄底下的相對路徑相同。用 ②③ 認到時 `touch()` 會把新路徑加進 `paths`。git remote 由 `main.js` 的 `gitRemote(dir)` 直接讀 `.git/config`（支援 worktree 的 `.git` 檔案）。
   - **重複專案會自動併成一筆**：`normalize()` 會把同一個 remote 或共用路徑的專案用 `combine()` 併起來（`merge()` 也用同一個 `combine()`）。同一個 id 取 `updatedAt` 較新的內容；**不同 id** 保留 id 較小的那筆和它的名稱／remind，進度、下一步取較新且有內容的。被併掉的 id 寫進 `deleted`（`at` = 它的 `updatedAt`），舊版 App 合併時才不會把它加回來。
-  - 舊專案可能沒有 `remote`：`main.js` 的 `fillRemotes()`（啟動、`pollDataFile()` 合併後、`setDataDir()` 後）會用 `store.fillRemotes(data, remoteOf)` 從本機資料夾補上，有補到就順便併掉重複的。`store.touch()` 第一次查到 remote 時也會 `fold()`，所以回傳的專案可能是另一筆（id 較小的那筆）。
+  - `main.js` 的 `fillRemotes()`（啟動、`pollDataFile()` 合併後、`setDataDir()` 後、`showWin()` 時最多 10 秒一次）做兩件事：① 找不到資料夾的專案，用 `repoCandidates()` 掃其他專案路徑的上一層（只看一層、要有自己的 `.git`），`store.relocate()` 把 remote 相同的資料夾接上（資料夾改名／搬家）；② `store.fillRemotes(data, remoteOf)` 把本機查到、還沒記的 remote 加進 `remotes`（舊專案、GitHub 改名後改了 origin），有補到就順便併掉重複的。
+  - `store.touch()` 查到新的 remote 時也會加進 `remotes` 並 `fold()`，所以回傳的專案可能是另一筆（id 較小的那筆）。**只有 cwd 就是專案資料夾時才記 remote**：在子資料夾開啟時查到的可能是裡面另一個 repo 的。
   - 改資料格式時，要考慮使用者已經存的舊資料（包括 1.0.0 前的專案筆記格式）：在 `store.js` 的 `normalizeProject()` 補預設值。`update()` 只接受 `EDITABLE` 裡的欄位（路徑不能從畫面改）。
 
 ## 提醒流程

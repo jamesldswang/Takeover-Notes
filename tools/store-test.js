@@ -102,7 +102,59 @@ t('重複：舊專案沒記 remote，另一台電腦又新增了一份 → 補�
   const old = s.normalize(JSON.parse(before));
   assert.strictEqual(s.canon(s.merge(d, old)), s.canon(d));
   assert.strictEqual(s.canon(s.merge(old, d)), s.canon(d));
-  assert.strictEqual(s.fillRemotes(d, () => 'x'), false, '已經有 remote 就不再查');
+  assert.strictEqual(s.fillRemotes(d, () => 'https://github.com/j/Clock.git'), false, '已經記過的 remote 不算改變');
+});
+
+t('GitHub 改名：本機改了網址後記下新名稱，用新名稱 clone 的電腦也認得', () => {
+  const d = s.normalize({ projects: [
+    { id: 'a1', name: '刺蝟', path: 'D:/Personal_Git/hedgehog', remote: 'github.com/j/-', next: '調平衡', updatedAt: '2026-11-05T05:00:00Z' },
+  ] });
+  // 同一台電腦、同一個資料夾，origin 已經改成新名稱
+  const p = s.touch(d, 'D:/Personal_Git/hedgehog', { remote: 'https://github.com/j/hedgehog-pet.git' });
+  assert.deepStrictEqual(p.remotes, ['github.com/j/-', 'github.com/j/hedgehog-pet']);
+  // 另一台電腦用新名稱 clone 到不同位置
+  const q = s.touch(d, 'E:/code/hedgehog-pet', { home: H2, remote: 'git@github.com:j/hedgehog-pet.git' });
+  assert.strictEqual(q, p);
+  assert.strictEqual(d.projects.length, 1);
+  // 另一台電腦還是舊名稱也認得
+  assert.strictEqual(s.findByPath(d, 'F:/x', { remote: 'github.com/j/-' }), p);
+  // 在子資料夾（裡面可能是別的 repo）開啟，不記 remote
+  s.touch(d, 'D:/Personal_Git/hedgehog/vendor/lib', { remote: 'github.com/other/lib' });
+  assert.ok(!p.remotes.includes('github.com/other/lib'));
+});
+
+t('GitHub 改名：只有一台記得新名稱，合併後兩個名稱都在，順序不影響', () => {
+  const base = { id: 'a1', path: 'D:/P/x', remote: 'github.com/j/old', updatedAt: '2026-11-05T05:00:00Z' };
+  const a = s.normalize({ projects: [base] });
+  const b = s.normalize({ projects: [{ ...base, remotes: ['github.com/j/old', 'github.com/j/new'] }] });
+  const m = s.merge(a, b);
+  assert.deepStrictEqual(m.projects[0].remotes, ['github.com/j/new', 'github.com/j/old']);
+  assert.strictEqual(s.canon(s.merge(a, b)), s.canon(s.merge(b, a)));
+  assert.strictEqual(s.canon(s.merge(m, m)), s.canon(m));
+  // 另一台電腦用新名稱新增了一份 → 併成一個
+  const c = s.normalize({ projects: [{ id: 'z9', path: 'E:/new', remote: 'github.com/j/new', updatedAt: '2026-11-06T00:00:00Z' }] });
+  assert.strictEqual(s.merge(m, c).projects.length, 1);
+});
+
+t('資料夾改名：用附近資料夾的 git remote 接上新位置', () => {
+  const d = s.normalize({ projects: [
+    { id: 'a1', path: 'D:/Personal_Git/bead-grid', remote: 'github.com/j/perler-beads' },
+    { id: 'a2', path: 'D:/Personal_Git/voice-ledger', remote: 'github.com/j/voice-ledger' },
+    { id: 'a3', path: 'D:/Personal_Git/no-remote' },
+  ] });
+  const exists = new Set([s.normPath('D:/Personal_Git/voice-ledger')]);
+  const isLocal = (p) => p.paths.some((x) => exists.has(s.normPath(x)));
+  const candidates = [
+    { dir: 'D:/Personal_Git/voice-ledger', remote: 'https://github.com/j/voice-ledger.git' },
+    { dir: 'D:/Personal_Git/Perler-Beads', remote: 'https://github.com/j/Perler-Beads.git' },
+  ];
+  assert.strictEqual(s.relocate(d, isLocal, candidates), true);
+  const p = d.projects.find((x) => x.id === 'a1');
+  assert.strictEqual(s.normPath(p.path), s.normPath('D:/Personal_Git/Perler-Beads'));
+  assert.strictEqual(p.paths.length, 2, '舊路徑也留著（別台電腦可能還用）');
+  assert.strictEqual(d.projects.length, 3);
+  exists.add(s.normPath('D:/Personal_Git/Perler-Beads'));
+  assert.strictEqual(s.relocate(d, isLocal, candidates), false, '接上之後不再改變');
 });
 
 t('重複：開啟時才查到 remote，也會併成一個', () => {

@@ -5,7 +5,9 @@
 //   id, name, path,            // path：最近一次使用的路徑
 //   paths: [],                 // 這個專案在各台電腦用過的所有路徑
 //   homePaths: [],             // 相對於該台電腦家目錄的路徑（例如 'ClockApp'），換電腦時用來認專案
-//   remote: '',                // git origin（正規化成 github.com/owner/repo），換電腦時用來認專案
+//   remotes: [],               // 用過的所有 git origin（正規化成 github.com/owner/repo），換電腦時用來認專案；
+//                              // GitHub 改名後新舊名稱都會在這裡，用哪一個 clone 都認得
+//   remote: '',                // remotes[0]，給還不認得 remotes 的舊版 App 用
 //   progress, next, remind, history: [{ at, text }],
 //   createdAt, updatedAt, lastOpenedAt   // ISO 字串；updatedAt 只在內容改變時更新，合併時用
 // }
@@ -50,13 +52,15 @@ function normalizeProject(p) {
   const mainPath = String(p.path || (p.paths && p.paths[0]) || '');
   const paths = uniqPaths([mainPath, ...(Array.isArray(p.paths) ? p.paths.map(String) : [])])
     .sort((x, y) => normPath(x).localeCompare(normPath(y)));
+  const remotes = uniq([...(Array.isArray(p.remotes) ? p.remotes : []), p.remote].map(normRemote)).sort();
   return {
     id: String(p.id || newId()),
     name: String(p.name || (mainPath ? path.basename(mainPath) : '未命名專案')),
     path: mainPath,
     paths,
     homePaths: uniq([...(Array.isArray(p.homePaths) ? p.homePaths.map(String) : []), ...paths.map((x) => homeRel(x))]).sort(),
-    remote: normRemote(p.remote),
+    remotes,
+    remote: remotes[0] || '',
     progress: String(p.progress || ''),
     next: String(p.next || ''),
     remind: p.remind !== false,
@@ -78,7 +82,7 @@ function normalize(d) {
   // 同一份資料裡重複的專案（同一個 git remote 或共用路徑，例如另一台電腦先新增了、之後才認出是同一個）併成一個
   const projects = [];
   for (const q of all) {
-    const i = projects.findIndex((p) => p.id === q.id || (p.remote && p.remote === q.remote) || sharesPath(p, q));
+    const i = projects.findIndex((p) => p.id === q.id || sharesRemote(p, q) || sharesPath(p, q));
     if (i < 0) { projects.push(q); continue; }
     const c = combine(projects[i], q);
     // 被併掉的 id 留刪除紀錄：還沒更新的舊版 App 合併時才不會把它加回來
@@ -91,6 +95,7 @@ function normalize(d) {
 }
 
 const sharesPath = (p, q) => p.paths.some((x) => q.paths.some((y) => normPath(x) === normPath(y)));
+const sharesRemote = (p, q) => p.remotes.some((r) => q.remotes.includes(r));
 
 // 把同一個專案的兩份合成一份（結果跟參數順序無關）。
 // 同一個 id（兩台電腦各改一份）：內容取 updatedAt 比較新的。
@@ -106,7 +111,7 @@ function combine(p, q) {
     id: first.id,
     paths: [...p.paths, ...q.paths],
     homePaths: [...p.homePaths, ...q.homePaths],
-    remote: [p.remote, q.remote].filter(Boolean).sort()[0] || '',
+    remotes: [...p.remotes, ...q.remotes],
     history: [...p.history, ...q.history]
       .filter((h) => { const k = h.at + '|' + h.text; return !seen.has(k) && seen.add(k); }),
     createdAt: p.createdAt < q.createdAt ? p.createdAt : q.createdAt,
@@ -138,7 +143,7 @@ function findByPath(data, cwd, { remote = '', home } = {}) {
   if (best) return best;
   const r = normRemote(remote);
   if (r) {
-    const byRemote = data.projects.find((p) => p.remote === r);
+    const byRemote = data.projects.find((p) => p.remotes.includes(r));
     if (byRemote) return byRemote;
   }
   const rel = homeRel(cwd, home);
@@ -164,12 +169,21 @@ function touch(data, cwd, { open = true, remote = '', home } = {}) {
   } else if (!p.paths.some((x) => { const n = normPath(x), c = normPath(cwd); return c === n || c.startsWith(n + '\\'); })) {
     addPath(p, cwd, home);
   }
-  if (remote && !p.remote) {
-    p.remote = normRemote(remote);
-    if (data.projects.some((x) => x !== p && x.remote === p.remote)) p = fold(data, p);
+  // 記下新的 remote（第一次查到、或 GitHub 改名後本機改了網址）。
+  // 只在 cwd 就是專案資料夾時才記：在子資料夾開啟時，查到的可能是裡面另一個 repo 的 remote。
+  const r = normRemote(remote);
+  const c = normPath(cwd);
+  if (r && !p.remotes.includes(r) && p.paths.some((x) => normPath(x) === c)) {
+    addRemote(p, r);
+    if (data.projects.some((x) => x !== p && x.remotes.includes(r))) p = fold(data, p);
   }
   if (open) p.lastOpenedAt = nowIso();
   return p;
+}
+
+function addRemote(p, r) {
+  p.remotes = uniq([...p.remotes, r]).sort();
+  p.remote = p.remotes[0];
 }
 
 // 重新整理 data（併掉重複的專案），回傳 p 併進去之後的那個專案
@@ -177,17 +191,34 @@ function fold(data, p) {
   const n = normalize(data);
   data.projects = n.projects;
   data.deleted = n.deleted;
-  return data.projects.find((x) => x.remote && x.remote === p.remote) || p;
+  return data.projects.find((x) => x.id === p.id || sharesRemote(x, p)) || p;
 }
 
-// 補上還沒記錄的 git remote（舊資料、或在加入 remote 功能之前建立的專案）。
+// 補上這台電腦查得到、但還沒記錄的 git remote（舊資料、加入 remote 功能前建立的專案、GitHub 改名後改了網址）。
 // remoteOf(p) 回傳這台電腦上查得到的 remote；有補到就順便併掉重複的專案。回傳是否有改變。
 function fillRemotes(data, remoteOf) {
   let changed = false;
   for (const p of data.projects) {
-    if (p.remote) continue;
     const r = normRemote(remoteOf(p));
-    if (r) { p.remote = r; changed = true; }
+    if (r && !p.remotes.includes(r)) { addRemote(p, r); changed = true; }
+  }
+  if (changed) { const n = normalize(data); data.projects = n.projects; data.deleted = n.deleted; }
+  return changed;
+}
+
+// 資料夾改名或搬家：記錄的路徑在這台電腦都找不到的專案，
+// 從 candidates（[{ dir, remote }]，main.js 掃描附近資料夾得到的 git repo）找 remote 相同的接上。
+// isLocal(p) 回傳這台電腦上是否找得到 p 的資料夾。回傳是否有改變。
+function relocate(data, isLocal, candidates, home) {
+  let changed = false;
+  const taken = new Set(data.projects.flatMap((p) => p.paths.map(normPath)));
+  for (const p of data.projects) {
+    if (!p.remotes.length || isLocal(p)) continue;
+    const hit = candidates.find((c) => !taken.has(normPath(c.dir)) && p.remotes.includes(normRemote(c.remote)));
+    if (!hit) continue;
+    addPath(p, hit.dir, home);
+    taken.add(normPath(hit.dir));
+    changed = true;
   }
   if (changed) { const n = normalize(data); data.projects = n.projects; data.deleted = n.deleted; }
   return changed;
@@ -237,7 +268,7 @@ function merge(a, b) {
   // 結果不能跟合併順序有關（merge(a,b) 和 merge(b,a) 要一樣），
   // 否則兩台電腦會互相覺得「對方的版本不一樣」，一直改寫同步資料夾裡的檔案。
   const out = A.projects.map((p) => ({ ...p }));
-  const same = (p, q) => p.id === q.id || (p.remote && p.remote === q.remote)
+  const same = (p, q) => p.id === q.id || sharesRemote(p, q)
     || sharesPath(p, q)
     || p.homePaths.some((x) => x && q.homePaths.includes(x));
 
@@ -288,4 +319,4 @@ function suggestNext(text) {
   return out.join('\n').trim().slice(0, 2000);
 }
 
-module.exports = { normPath, homeRel, normRemote, normalize, normalizeProject, findByPath, touch, addPath, fillRemotes, update, completeNext, remove, merge, canon, suggestNext };
+module.exports = { normPath, homeRel, normRemote, normalize, normalizeProject, findByPath, touch, addPath, fillRemotes, relocate, update, completeNext, remove, merge, canon, suggestNext };
