@@ -324,6 +324,7 @@ function showWin(newMode) {
   if (!win) return;
   if (newMode) mode = newMode;
   maybeRelocate();
+  sendProjects(); // 重新檢查哪些資料夾在這台電腦上（例如剛 git clone 回來），更新「這台電腦找不到」
   const [w, h] = SIZES[mode];
   const { x, y, width, height } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
   win.setBounds({ x: Math.round(x + (width - w) / 2), y: Math.round(y + (height - h) / 2), width: w, height: h });
@@ -658,7 +659,7 @@ app.whenReady().then(() => {
   });
 });
 
-module.exports = { launches, setDataDir, pollDataFile, fillRemotes, getData: () => data }; // 給測試用
+module.exports = { launches, setDataDir, pollDataFile, fillRemotes, showWin, getData: () => data }; // 給測試用
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();

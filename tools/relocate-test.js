@@ -37,13 +37,23 @@ module.exports = async ({ page, runCli }) => {
   gitInit(clone, 'https://github.com/j/bead-studio');
   const cli = await runCli(['--cwd', clone, '--progress', '新電腦']);
 
+  // 4. 這台電腦本來沒有、後來在記錄的路徑 git clone 回來 → 叫出視窗時就不再顯示「找不到」
+  const later = path.join(root, 'Later');
+  await runCli(['--cwd', later, '--next', '之後才 clone']);
+  const missingBefore = await page(`projects.find(p => p.next === '之後才 clone').localPath`);
+  gitInit(later, 'https://github.com/j/later.git');
+  main.showWin();
+  await new Promise((r) => setTimeout(r, 300));
+  const foundAfter = await page(`projects.find(p => p.next === '之後才 clone').localPath`);
+
   const result = {
+    clonedLaterFound: missingBefore === '' && path.resolve(foundAfter || '.') === path.resolve(later),
     relocated: path.resolve(p1.path) === path.resolve(newDir),
     keptOldPath: p1.paths.length === 2,
     pageLocalPath: path.resolve(shown) === path.resolve(newDir),
     otherUntouched: main.getData().projects.find((p) => p.next === '別的').paths.length === 1,
     remotes: p2.remotes,
-    cloneMatched: find().progress === '新電腦' && main.getData().projects.length === 2,
+    cloneMatched: find().progress === '新電腦' && main.getData().projects.length === 3,
     cliCode: cli.code,
   };
   fs.rmSync(root, { recursive: true, force: true });
